@@ -1,0 +1,83 @@
+{
+  "id": "agentlink",
+  "name": "AgentLink",
+  "description": "Agent-to-agent coordination via MQTT. Your agent talks to other people's agents.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["brokerUrl", "agent"],
+    "properties": {
+      "brokerUrl": {
+        "type": "string",
+        "description": "MQTT broker URL (mqtts:// for TLS, mqtt:// for local dev)",
+        "default": "mqtts://broker.agentlink.dev:8883"
+      },
+      "brokerUsername": {
+        "type": "string",
+        "description": "MQTT broker username"
+      },
+      "brokerPassword": {
+        "type": "string",
+        "description": "MQTT broker password"
+      },
+      "agent": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique agent identifier (e.g. rupul-macbook)",
+            "pattern": "^[a-z0-9][a-z0-9\\-]{2,39}$"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable agent description"
+          },
+          "capabilities": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "required": ["name", "tool"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Capability name (exact match for routing)"
+                },
+                "tool": {
+                  "type": "string",
+                  "description": "OpenClaw tool ID this capability maps to"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "What this capability does"
+                },
+                "input_hint": {
+                  "type": "string",
+                  "description": "What input the capability expects"
+                }
+              }
+            }
+          }
+        }
+      },
+      "output_mode": {
+        "type": "string",
+        "enum": ["user", "debug"],
+        "default": "user",
+        "description": "user = outcomes only, debug = coordination steps visible"
+      },
+      "job_timeout_ms": {
+        "type": "number",
+        "default": 60000,
+        "description": "Job timeout in milliseconds"
+      },
+      "data_dir": {
+        "type": "string",
+        "description": "Override data directory (default: ~/.agentlink)"
+      }
+    }
+  }
+}
