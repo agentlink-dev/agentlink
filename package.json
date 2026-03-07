@@ -23,6 +23,7 @@
     "test:watch": "vitest",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
+    "test:e2e": "npx tsx test/two-agent-e2e.ts",
     "prepublishOnly": "npm test"
   },
   "keywords": [

@@ -17,20 +17,24 @@ export interface ContactsManager {
 
 export function createContacts(dataDir: string): ContactsManager {
   const filePath = path.join(dataDir, "contacts.json");
-  let contacts: Record<string, ContactEntry> = {};
 
-  if (fs.existsSync(filePath)) {
-    const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    contacts = raw.contacts ?? {};
+  function load(): Record<string, ContactEntry> {
+    try {
+      const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      return raw.contacts ?? {};
+    } catch {
+      return {};
+    }
   }
 
-  function save() {
+  function save(contacts: Record<string, ContactEntry>) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify({ contacts }, null, 2));
   }
 
   return {
     resolve(nameOrId) {
+      const contacts = load();
       if (contacts[nameOrId]) return contacts[nameOrId].agent_id;
       for (const entry of Object.values(contacts)) {
         if (entry.agent_id === nameOrId) return nameOrId;
@@ -39,28 +43,30 @@ export function createContacts(dataDir: string): ContactsManager {
     },
 
     add(name, agentId) {
+      const contacts = load();
       contacts[name] = {
         agent_id: agentId,
         added: new Date().toISOString().split("T")[0],
       };
-      save();
+      save(contacts);
     },
 
     remove(name) {
+      const contacts = load();
       delete contacts[name];
-      save();
+      save(contacts);
     },
 
     has(name) {
-      return name in contacts;
+      return name in load();
     },
 
     getAll() {
-      return { ...contacts };
+      return { ...load() };
     },
 
     getNameByAgentId(agentId) {
-      for (const [name, entry] of Object.entries(contacts)) {
+      for (const [name, entry] of Object.entries(load())) {
         if (entry.agent_id === agentId) return name;
       }
       return null;
