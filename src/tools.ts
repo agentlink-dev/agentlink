@@ -102,6 +102,8 @@ const CompleteSchema = Type.Object({
   ),
 });
 
+const StatusSchema = Type.Object({});
+
 // ---------------------------------------------------------------------------
 // createTools
 // ---------------------------------------------------------------------------
@@ -348,5 +350,35 @@ export function createTools(
     },
   };
 
-  return [coordinateTool, submitJobTool, inviteAgentTool, joinGroupTool, completeTool];
+  // -----------------------------------------------------------------------
+  // agentlink_status
+  // -----------------------------------------------------------------------
+  const statusTool = {
+    name: "agentlink_status",
+    label: "Status",
+    description:
+      "Check AgentLink health: broker connection, agent identity, and active groups. Use this to verify the plugin is working.",
+    parameters: StatusSchema,
+    async execute(_id: string, _params: Record<string, unknown>) {
+      const connected = mqtt.getClient().isConnected();
+      const activeGroupIds = state.getActiveGroups();
+      const groups = activeGroupIds.map((id) => {
+        const g = state.getGroup(id);
+        return g
+          ? { group_id: id, goal: g.goal, participants: g.participants.length, status: g.status }
+          : { group_id: id };
+      });
+
+      return json({
+        agent_id: config.agent.id,
+        broker: config.brokerUrl,
+        connected,
+        active_groups: groups.length,
+        groups,
+        capabilities: config.agent.capabilities.map((c) => c.name),
+      });
+    },
+  };
+
+  return [statusTool, coordinateTool, submitJobTool, inviteAgentTool, joinGroupTool, completeTool];
 }

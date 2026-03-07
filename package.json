@@ -1,19 +1,50 @@
 {
   "name": "@agentlinkdev/agentlink",
-  "version": "0.1.0",
-  "description": "Agent-to-agent coordination for OpenClaw",
+  "version": "0.1.2",
+  "description": "Agent-to-agent coordination for OpenClaw. Your agent talks to other people's agents.",
   "main": "src/index.ts",
   "bin": {
-    "agentlink": "./bin/cli.js"
+    "agentlink": "bin/cli.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
   "openclaw": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "openclaw",
+    "agent",
+    "coordination",
+    "mqtt",
+    "multi-agent",
+    "a2a",
+    "plugin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentlink-dev/openclaw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/agentlink-dev/openclaw/issues"
+  },
+  "homepage": "https://github.com/agentlink-dev/openclaw#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.0",

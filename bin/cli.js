@@ -271,6 +271,8 @@ async function cmdSetup(args) {
     info("Restart the OpenClaw gateway to activate AgentLink:");
     info("  openclaw gateway stop && openclaw gateway");
     console.log("");
+    info('Verify: ask your agent "check agentlink status"');
+    console.log("");
     return;
   }
 
@@ -289,8 +291,12 @@ async function cmdSetup(args) {
     });
     child.unref();
     success("Gateway restarted in background");
+    console.log("");
+    info('Verify: ask your agent "check agentlink status"');
   } else {
     info("Restart manually: openclaw gateway stop && openclaw gateway");
+    console.log("");
+    info('Verify: ask your agent "check agentlink status"');
   }
   console.log("");
 }
@@ -318,14 +324,24 @@ async function cmdUninstall() {
   // 4. Remove from plugins.allow
   removeFromArray("plugins.allow", PLUGIN_NAME);
 
-  // 5. Uninstall plugin
+  // 5. Uninstall plugin (pipe 'y' to auto-confirm the OC prompt)
   info("Uninstalling plugin...");
   try {
-    execSync(`openclaw plugins uninstall ${PLUGIN_NAME}`, { stdio: "inherit" });
+    execSync(`echo y | openclaw plugins uninstall ${PLUGIN_NAME}`, {
+      stdio: ["pipe", "inherit", "inherit"],
+      shell: true,
+    });
   } catch {
     warn("Plugin uninstall command failed (may already be removed).");
   }
-  success("Plugin uninstalled");
+
+  // Verify plugin was actually removed
+  if (isPluginInstalled()) {
+    warn("Plugin may not have been fully removed. Run manually:");
+    info("  openclaw plugins uninstall agentlink");
+  } else {
+    success("Plugin uninstalled");
+  }
 
   // 6. Print preservation notice
   console.log("");
