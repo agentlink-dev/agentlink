@@ -11,7 +11,7 @@
       "brokerUrl": {
         "type": "string",
         "description": "MQTT broker URL (mqtts:// for TLS, mqtt:// for local dev)",
-        "default": "mqtts://broker.agentlink.dev:8883"
+        "default": "mqtt://broker.emqx.io:1883"
       },
       "brokerUsername": {
         "type": "string",

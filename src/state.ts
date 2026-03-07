@@ -3,6 +3,13 @@ import path from "node:path";
 import type { GroupState, JobStatus, PendingJob, TimedOutJob } from "./types.js";
 
 export interface StateManager {
+  // Identity
+  getAgentId(): string | null;
+
+  // Pending joins (from CLI --join flag)
+  getPendingJoins(): string[];
+  removePendingJoin(code: string): void;
+
   // Groups
   addGroup(group: GroupState): void;
   getGroup(groupId: string): GroupState | null;
@@ -23,6 +30,8 @@ export interface StateManager {
 }
 
 interface StateData {
+  agent_id?: string;
+  pending_joins?: string[];
   groups: Record<string, GroupState>;
   pending_jobs: Record<string, PendingJob>;
 }
@@ -35,7 +44,13 @@ export function createState(dataDir: string): StateManager {
   };
 
   if (fs.existsSync(filePath)) {
-    data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const loaded = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    data = {
+      ...data,
+      ...loaded,
+      groups: loaded.groups ?? data.groups,
+      pending_jobs: loaded.pending_jobs ?? data.pending_jobs,
+    };
   }
 
   function save() {
@@ -44,6 +59,21 @@ export function createState(dataDir: string): StateManager {
   }
 
   return {
+    getAgentId() {
+      return data.agent_id ?? null;
+    },
+
+    getPendingJoins() {
+      return data.pending_joins ? [...data.pending_joins] : [];
+    },
+
+    removePendingJoin(code) {
+      if (data.pending_joins) {
+        data.pending_joins = data.pending_joins.filter((c) => c !== code);
+        save();
+      }
+    },
+
     addGroup(group) {
       data.groups[group.group_id] = group;
       save();

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { v4 as uuid } from "uuid";
@@ -32,18 +33,43 @@ export function resolveConfig(rawConfig: Record<string, unknown>): AgentLinkConf
   const agent = cfg.agent as Record<string, unknown> | undefined;
   const capabilities = (agent?.capabilities as Capability[] | undefined) ?? [];
 
+  // Resolve dataDir first — needed for persistent agent ID lookup
+  const dataDir = (cfg.data_dir as string) ?? path.join(os.homedir(), ".agentlink");
+
+  // 3-tier agent ID resolution:
+  // 1. Explicit agent.id from config (user-configured)
+  // 2. Persistent agent_id from <dataDir>/state.json (set by CLI setup)
+  // 3. Temp fallback agent-HOSTNAME-PID (dev without setup)
+  let agentId = agent?.id as string | undefined;
+  if (!agentId) {
+    try {
+      const stateFile = path.join(dataDir, "state.json");
+      if (fs.existsSync(stateFile)) {
+        const stateData = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+        if (stateData.agent_id && typeof stateData.agent_id === "string") {
+          agentId = stateData.agent_id;
+        }
+      }
+    } catch {
+      // state.json unreadable — fall through to temp ID
+    }
+  }
+  if (!agentId) {
+    agentId = `agent-${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, "")}-${process.pid}`;
+  }
+
   return {
-    brokerUrl: (cfg.brokerUrl as string) ?? "mqtts://broker.agentlink.dev:8883",
+    brokerUrl: (cfg.brokerUrl as string) ?? "mqtt://broker.emqx.io:1883",
     brokerUsername: cfg.brokerUsername as string | undefined,
     brokerPassword: cfg.brokerPassword as string | undefined,
     agent: {
-      id: (agent?.id as string) ?? `agent-${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, "")}-${process.pid}`,
+      id: agentId,
       description: agent?.description as string | undefined,
       capabilities,
     },
     outputMode: (cfg.output_mode as "user" | "debug") ?? "user",
     jobTimeoutMs: (cfg.job_timeout_ms as number) ?? 60_000,
-    dataDir: (cfg.data_dir as string) ?? path.join(os.homedir(), ".agentlink"),
+    dataDir,
   };
 }
 

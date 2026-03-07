@@ -39,24 +39,33 @@ export function createMqttClient(config: AgentLinkConfig, logger: Logger): MqttC
         connectTimeout: 10_000,
       });
 
-      return new Promise<void>((resolve, reject) => {
-        const onConnect = () => {
-          cleanup();
-          logger.info(`[AgentLink] Connected to broker: ${config.brokerUrl}`);
-          resolve();
-        };
-        const onError = (err: Error) => {
-          cleanup();
-          logger.error(`[AgentLink] MQTT error: ${err.message}`);
-          reject(err);
-        };
-        function cleanup() {
-          client!.removeListener("connect", onConnect);
-          client!.removeListener("error", onError);
-        }
+      return new Promise<void>((resolve) => {
+        let resolved = false;
 
-        client!.on("connect", onConnect);
-        client!.on("error", onError);
+        client!.on("connect", () => {
+          if (!resolved) {
+            resolved = true;
+            logger.info(`[AgentLink] Connected to broker: ${config.brokerUrl}`);
+            resolve();
+          } else {
+            logger.info(`[AgentLink] Reconnected to broker`);
+          }
+          // Resubscribe on every connect (clean:true means broker forgets subscriptions)
+          for (const topic of subscribedTopics) {
+            client!.subscribe(topic, { qos: 1 });
+          }
+        });
+
+        client!.on("error", (err: Error) => {
+          if (!resolved) {
+            // First connection attempt failed — start anyway, mqtt.js will keep retrying
+            resolved = true;
+            logger.warn(`[AgentLink] Broker unavailable (${err.message}), will retry in background`);
+            resolve();
+          } else {
+            logger.warn(`[AgentLink] MQTT error: ${err.message}`);
+          }
+        });
 
         client!.on("message", (topic, payload) => {
           for (const handler of messageHandlers) {
@@ -66,13 +75,6 @@ export function createMqttClient(config: AgentLinkConfig, logger: Logger): MqttC
 
         client!.on("reconnect", () => {
           logger.info("[AgentLink] Reconnecting to broker...");
-        });
-
-        // Resubscribe on reconnect (clean:true means broker forgets subscriptions)
-        client!.on("connect", () => {
-          for (const topic of subscribedTopics) {
-            client!.subscribe(topic, { qos: 1 });
-          }
         });
 
         client!.on("offline", () => {
@@ -90,8 +92,10 @@ export function createMqttClient(config: AgentLinkConfig, logger: Logger): MqttC
     },
 
     async subscribe(topic) {
-      if (!client) throw new Error("MQTT not connected");
+      if (!client) throw new Error("MQTT client not initialized");
       subscribedTopics.add(topic);
+      // If not connected, the topic is tracked and will be subscribed on (re)connect
+      if (!client.connected) return;
       return new Promise<void>((resolve, reject) => {
         client!.subscribe(topic, { qos: 1 }, (err) => {
           if (err) reject(err);
@@ -112,7 +116,8 @@ export function createMqttClient(config: AgentLinkConfig, logger: Logger): MqttC
     },
 
     async publish(topic, payload, options = {}) {
-      if (!client) throw new Error("MQTT not connected");
+      if (!client) throw new Error("MQTT client not initialized");
+      if (!client.connected) throw new Error("MQTT broker not connected (retrying in background)");
       return new Promise<void>((resolve, reject) => {
         client!.publish(
           topic,

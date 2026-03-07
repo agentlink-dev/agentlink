@@ -147,7 +147,43 @@ function register(api: PluginApi) {
   // Background MQTT connection
   api.registerService({
     id: "agentlink-mqtt",
-    start: () => mqttService.start(),
+    start: async () => {
+      await mqttService.start();
+
+      // Process pending joins from CLI --join flag
+      const pendingJoins = state.getPendingJoins();
+      for (const code of pendingJoins) {
+        try {
+          log(`Processing pending join: ${code}`);
+          const invite = await invites.resolveInviteCode(code);
+          if (invite) {
+            const groupId = invite.group_id;
+            await mqttService.subscribeGroup(groupId);
+            state.addGroup({
+              group_id: groupId,
+              driver: invite.from,
+              goal: invite.goal,
+              done_when: "",
+              intent_id: "",
+              participants: [invite.from],
+              status: "active",
+              idle_turns: 0,
+              created_at: new Date().toISOString(),
+            });
+            if (!contacts.resolve(invite.from)) {
+              contacts.add(invite.from, invite.from);
+            }
+            state.removePendingJoin(code);
+            log(`Auto-joined group from setup: ${code}`);
+          } else {
+            log(`Pending join ${code}: invite not found (will retry next restart)`);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log(`Failed to auto-join ${code}: ${msg}`);
+        }
+      }
+    },
     stop: () => mqttService.stop(),
   });
 
