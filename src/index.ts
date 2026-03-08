@@ -81,8 +81,6 @@ function register(api: PluginApi) {
       }
     : undefined;
 
-  const jobs = createJobManager(config, state, mqttService, logger, executeTool);
-
   // Channel inbound: wakes agent when MQTT events arrive (autonomous coordination)
   const channelInbound: ChannelInbound | null = api.runtime?.channel
     ? createChannelInbound(config, state, contacts, mqttService, api.runtime.channel, api.config, logger)
@@ -91,6 +89,23 @@ function register(api: PluginApi) {
   if (!channelInbound) {
     logger.warn("[AgentLink] Channel inbound API not available. Autonomous coordination disabled.");
   }
+
+  // LLM fallback: when no capability matches a job_request, dispatch to the agent's
+  // LLM so it can answer from its memory/knowledge (MEMORY.md, IDENTITY.md, etc.)
+  const llmFallback = channelInbound
+    ? async (groupId: string, question: string, senderAgentId: string): Promise<string> => {
+        const senderName = contacts.getNameByAgentId(senderAgentId) ?? senderAgentId;
+        const agentBody = [
+          `[AgentLink] ${senderName}'s assistant is asking you: ${question}`,
+          ``,
+          `Answer based on what you know about your human. Be concise and direct — just provide the information requested.`,
+          `Do NOT use any tools. Just reply with text.`,
+        ].join("\n");
+        return channelInbound.dispatchAndCapture(groupId, "", senderAgentId, agentBody);
+      }
+    : undefined;
+
+  const jobs = createJobManager(config, state, mqttService, logger, executeTool, llmFallback);
 
   // Wire inbound message handling
   mqttService.onGroupMessage((msg) => {
@@ -147,9 +162,17 @@ function register(api: PluginApi) {
 
       if (channelInbound && contacts.resolve(fromId)) {
         const groupId = msg.group_id as string;
-        channelInbound.dispatch(groupId,
-          `Invite from **${name}**: "${goal}"`,
-          fromId);
+        const inviteCode = msg.invite_code as string | undefined;
+        if (!inviteCode) {
+          logger.warn(`[AgentLink] Invite from ${name} missing invite_code — cannot join`);
+          return;
+        }
+        const agentBody = [
+          `[AgentLink] ${name}'s assistant invited you to coordinate. Goal: "${goal}"`,
+          `This is a known contact. Accept by calling agentlink_join_group with invite_code: "${inviteCode}"`,
+          `Do NOT output any text — just call the tool.`,
+        ].join("\n");
+        channelInbound.dispatch(groupId, "", fromId, agentBody);
       }
     }
   });

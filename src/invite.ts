@@ -11,7 +11,7 @@ export interface InviteCodeResult {
 export interface InviteManager {
   createInviteCode(groupId: string, from: string, goal: string): Promise<InviteCodeResult>;
   resolveInviteCode(code: string): Promise<InviteCodePayload | null>;
-  sendDirectInvite(targetAgentId: string, groupId: string, goal: string, doneWhen: string): Promise<void>;
+  sendDirectInvite(targetAgentId: string, groupId: string, goal: string, doneWhen: string): Promise<{ inviteCode: string }>;
 }
 
 export function createInviteManager(
@@ -80,12 +80,16 @@ export function createInviteManager(
     },
 
     async sendDirectInvite(targetAgentId, groupId, goal, doneWhen) {
-      const invite: InviteMessage = {
+      // Create an invite code so the receiver can join via agentlink_join_group
+      const { code } = await this.createInviteCode(groupId, config.agent.id, goal);
+
+      const invite: InviteMessage & { invite_code: string } = {
         type: "invite",
         group_id: groupId,
         from: config.agent.id,
         goal,
         done_when: doneWhen,
+        invite_code: code,
         ts: new Date().toISOString(),
       };
 
@@ -94,6 +98,8 @@ export function createInviteManager(
         JSON.stringify(invite),
         { qos: 1 },
       );
+
+      return { inviteCode: code };
     },
   };
 }

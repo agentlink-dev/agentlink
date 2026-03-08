@@ -25,6 +25,7 @@ export function createJobManager(
   mqtt: MqttService,
   logger: Logger,
   executeTool?: (toolId: string, input: string) => Promise<string>,
+  llmFallback?: (groupId: string, question: string, senderAgentId: string) => Promise<string>,
 ): JobManager {
   return {
     async submitJob(params) {
@@ -85,6 +86,39 @@ export function createJobManager(
 
       const cap = config.agent.capabilities.find((c) => c.name === capability);
       if (!cap) {
+        // No matching capability — try LLM fallback (dispatches to agent's LLM)
+        if (llmFallback) {
+          logger.info(`[AgentLink] No capability '${capability}' — falling back to LLM`);
+          try {
+            const result = await llmFallback(
+              msg.group_id,
+              msg.payload.text ?? `What can you tell me about: ${capability}?`,
+              msg.from,
+            );
+            const response = createEnvelope(config.agent.id, {
+              group_id: msg.group_id,
+              intent_id: msg.intent_id,
+              to: msg.from,
+              type: "job_response",
+              correlation_id: msg.correlation_id,
+              payload: {
+                status: "completed",
+                result,
+                capability,
+              },
+            });
+            await mqtt.publishEnvelope(
+              TOPICS.groupMessages(msg.group_id, config.agent.id),
+              response,
+            );
+            return response;
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.warn(`[AgentLink] LLM fallback failed: ${errMsg}`);
+            // Fall through to standard failure response
+          }
+        }
+
         const response = createEnvelope(config.agent.id, {
           group_id: msg.group_id,
           intent_id: msg.intent_id,

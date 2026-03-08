@@ -143,14 +143,9 @@ export function createTools(
         agentId: contacts.resolve(p),
       }));
 
-      const unresolved = resolved.filter((r) => !r.agentId);
-      if (unresolved.length > 0) {
-        return json({
-          error: `Unknown contacts: ${unresolved.map((u) => u.name).join(", ")}. Ask the user for their agent ID, or use agentlink_invite_agent with an agent_id.`,
-        });
-      }
+      const known = resolved.filter((r) => r.agentId);
+      const unknown = resolved.filter((r) => !r.agentId);
 
-      const participantIds = resolved.map((r) => r.agentId!);
       const groupId = uuid();
       const intentId = uuid();
 
@@ -169,17 +164,39 @@ export function createTools(
       await mqtt.subscribeGroup(groupId);
       await publishStatus(config, mqtt, groupId);
 
-      for (const pid of participantIds) {
-        await invites.sendDirectInvite(pid, groupId, goal, doneWhen);
-        log(`Invite sent to ${contacts.getNameByAgentId(pid) ?? pid}`);
+      // Send direct invites to known contacts
+      const invited: string[] = [];
+      for (const r of known) {
+        await invites.sendDirectInvite(r.agentId!, groupId, goal, doneWhen);
+        log(`Invite sent to ${r.name}`);
+        invited.push(r.name);
       }
 
-      const names = participantIds.map(p => contacts.getNameByAgentId(p) ?? p).join(", ");
-      return json({
-        group_id: groupId,
-        invited: names,
-        note: `Reaching out to ${names}'s assistant. They'll join shortly.`,
-      });
+      // Generate shareable invite codes for unknown contacts
+      const inviteCodes: Array<{ name: string; code: string; message: string }> = [];
+      for (const r of unknown) {
+        const result = await invites.createInviteCode(groupId, config.agent.id, goal);
+        inviteCodes.push({ name: r.name, code: result.code, message: result.shareableMessage });
+        log(`Invite code ${result.code} created for ${r.name}`);
+      }
+
+      const result: Record<string, unknown> = { group_id: groupId };
+
+      if (invited.length > 0) {
+        result.invited = invited.join(", ");
+        result.note = `Reaching out to ${invited.join(", ")}'s assistant. They'll join shortly.`;
+      }
+
+      if (inviteCodes.length > 0) {
+        result.invite_codes = inviteCodes.map(ic => ({
+          for: ic.name,
+          code: ic.code,
+          share_this: ic.message,
+        }));
+        result.action_needed = `Share the invite code(s) with: ${inviteCodes.map(ic => ic.name).join(", ")}. They need to run: agentlink setup --join <CODE>`;
+      }
+
+      return json(result);
     },
   };
 

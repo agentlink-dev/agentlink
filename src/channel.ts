@@ -136,6 +136,8 @@ export function createChannelPlugin(
 export interface ChannelInbound {
   /** Dispatch an event to the agent. body = user-visible, agentBody = LLM-visible (defaults to body). */
   dispatch(groupId: string, body: string, senderAgentId?: string, agentBody?: string): void;
+  /** Dispatch and capture the agent's text response (for LLM fallback on job requests). */
+  dispatchAndCapture(groupId: string, body: string, senderAgentId?: string, agentBody?: string): Promise<string>;
   dispatchToMainSession(body: string): void;
   clearWatchdog(groupId: string): void;
   shutdown(): void;
@@ -234,6 +236,19 @@ export function createChannelInbound(
     }, DEBOUNCE_MS));
   }
 
+  // Enqueue with a result (for dispatchAndCapture — needs the return value)
+  function enqueueDispatchWithResult(groupId: string, fn: () => Promise<string>): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const prev = dispatchQueues.get(groupId) ?? Promise.resolve();
+      const next = prev.then(
+        () => fn().then(resolve, reject),
+        () => fn().then(resolve, reject),
+      );
+      // Store void-ified promise in queue so subsequent dispatches chain correctly
+      dispatchQueues.set(groupId, next.then(() => {}, () => {}));
+    });
+  }
+
   // Core dispatch: build MsgContext, record session, dispatch to agent
   async function doDispatch(groupId: string, body: string, senderAgentId?: string, agentBody?: string) {
     const senderName = senderAgentId
@@ -312,6 +327,81 @@ export function createChannelInbound(
     }
   }
 
+  // Dispatch and capture: like doDispatch but collects the agent's text response
+  async function doDispatchAndCapture(groupId: string, body: string, senderAgentId?: string, agentBody?: string): Promise<string> {
+    const senderName = senderAgentId
+      ? (contacts.getNameByAgentId(senderAgentId) ?? senderAgentId)
+      : "system";
+
+    const group = state.getGroup(groupId);
+    const sessionLabel = group?.goal ?? `Group ${groupId.slice(0, 8)}`;
+
+    logger.info(`[AgentLink] dispatchAndCapture: group=${groupId.slice(0, 8)}, from=${senderName}, body=${(agentBody ?? body).slice(0, 80)}...`);
+
+    const collectedText: string[] = [];
+
+    try {
+      const route = channelApi.routing.resolveAgentRoute({
+        cfg: ocConfig,
+        channel: "agentlink",
+        accountId: config.agent.id,
+        peer: { kind: "group", id: groupId },
+      });
+
+      const ctx = channelApi.reply.finalizeInboundContext({
+        Body: body || " ",
+        BodyForAgent: agentBody ?? body,
+        SessionKey: route.sessionKey,
+        From: `agentlink:${senderAgentId ?? "system"}`,
+        To: `agentlink:${config.agent.id}`,
+        Provider: "agentlink",
+        Surface: "agentlink",
+        OriginatingChannel: "agentlink",
+        OriginatingTo: groupId,
+        SenderName: sessionLabel,
+        SenderId: senderAgentId ?? "system",
+        ChatType: "group",
+        CommandAuthorized: true,
+        Timestamp: Date.now(),
+      });
+
+      const cfgAny = ocConfig as Record<string, any>;
+      const storePath = channelApi.session.resolveStorePath(
+        cfgAny.session?.store ?? cfgAny.store,
+        { agentId: route.agentId },
+      );
+      await channelApi.session.recordInboundSession({
+        storePath,
+        sessionKey: route.sessionKey,
+        ctx,
+        onRecordError: (err) => logger.warn(`[AgentLink] recordInboundSession error: ${err}`),
+      });
+
+      await channelApi.reply.dispatchReplyWithBufferedBlockDispatcher({
+        ctx,
+        cfg: ocConfig,
+        dispatcherOptions: {
+          deliver: async (payload, _info) => {
+            // Capture non-reasoning, non-error text from the agent's response
+            if (payload.text && !payload.isReasoning && !payload.isError) {
+              collectedText.push(payload.text);
+            }
+          },
+          onError: (err, info) => {
+            logger.warn(`[AgentLink] dispatchAndCapture ${info.kind} error for group ${groupId}: ${err}`);
+          },
+        },
+        replyOptions: { disableBlockStreaming: true },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`[AgentLink] dispatchAndCapture failed for group ${groupId}: ${msg}`);
+      return `Error: ${msg}`;
+    }
+
+    return collectedText.join("") || "(no response)";
+  }
+
   // Dispatch to the main/webchat session (for completion callbacks)
   async function doDispatchToMainSession(body: string) {
     try {
@@ -372,6 +462,11 @@ export function createChannelInbound(
 
   return {
     dispatch: scheduleDebounced,
+    dispatchAndCapture(groupId: string, body: string, senderAgentId?: string, agentBody?: string): Promise<string> {
+      // No debounce — job responses need immediate dispatch.
+      // Uses per-group queue for serialization.
+      return enqueueDispatchWithResult(groupId, () => doDispatchAndCapture(groupId, body, senderAgentId, agentBody));
+    },
     dispatchToMainSession: scheduleMainSessionDispatch,
     clearWatchdog(groupId: string) {
       const timer = watchdogTimers.get(groupId);
