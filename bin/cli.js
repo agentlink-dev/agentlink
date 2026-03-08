@@ -14,9 +14,11 @@ const readline = require("readline");
 const OC_CONFIG_PATH = path.join(os.homedir(), ".openclaw", "openclaw.json");
 const AGENTLINK_DIR = path.join(os.homedir(), ".agentlink");
 const STATE_FILE = path.join(AGENTLINK_DIR, "state.json");
+const CONTACTS_FILE = path.join(AGENTLINK_DIR, "contacts.json");
 const PLUGIN_NAME = "agentlink";
 const NPM_PACKAGE = "@agentlinkdev/agentlink";
 const AGENT_ID_RE = /^[a-z0-9][a-z0-9\-]{2,39}$/;
+const DEFAULT_BROKER = "mqtt://broker.emqx.io:1883";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,6 +134,55 @@ function readState() {
 function writeState(data) {
   fs.mkdirSync(AGENTLINK_DIR, { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
+}
+
+function readContacts() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(CONTACTS_FILE, "utf-8"));
+    return raw.contacts ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function getBrokerUrl() {
+  const cfg = readOcConfig();
+  const pluginCfg = getNestedValue(cfg, "plugins.installs.agentlink.config");
+  return (pluginCfg && pluginCfg.brokerUrl) || DEFAULT_BROKER;
+}
+
+function checkBrokerConnectivity(brokerUrl) {
+  return new Promise((resolve) => {
+    // Parse mqtt:// URL → host:port for a raw TCP check
+    let host, port;
+    try {
+      const url = new URL(brokerUrl.replace(/^mqtt:\/\//, "http://").replace(/^mqtts:\/\//, "https://"));
+      host = url.hostname;
+      port = parseInt(url.port, 10) || (brokerUrl.startsWith("mqtts") ? 8883 : 1883);
+    } catch {
+      resolve({ ok: false, error: "Invalid broker URL" });
+      return;
+    }
+
+    const net = require("net");
+    const socket = new net.Socket();
+    const timeout = 5000;
+
+    socket.setTimeout(timeout);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve({ ok: true });
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve({ ok: false, error: `Connection timed out (${timeout}ms)` });
+    });
+    socket.once("error", (err) => {
+      socket.destroy();
+      resolve({ ok: false, error: err.message });
+    });
+    socket.connect(port, host);
+  });
 }
 
 function generateAgentId() {
@@ -256,10 +307,22 @@ async function cmdSetup(args) {
     }
   }
 
+  // 7b. Verify broker connectivity
+  const brokerUrl = getBrokerUrl();
+  info(`Checking broker connectivity (${brokerUrl})...`);
+  const brokerResult = await checkBrokerConnectivity(brokerUrl);
+  if (brokerResult.ok) {
+    success(`Broker reachable`);
+  } else {
+    warn(`Broker unreachable: ${brokerResult.error}`);
+    warn(`Agents won't be able to coordinate until the broker is available.`);
+  }
+
   // 8. Print summary
   console.log("\n  --- Setup Summary ---");
   info(`Plugin:   installed`);
   info(`Agent ID: ${state.agent_id}`);
+  info(`Broker:   ${brokerUrl}${brokerResult.ok ? "" : " (unreachable)"}`);
   if (joinCode) {
     info(`Join:     ${joinCode} (will process on gateway start)`);
   }
@@ -351,6 +414,108 @@ async function cmdUninstall() {
 }
 
 // ---------------------------------------------------------------------------
+// Status command
+// ---------------------------------------------------------------------------
+
+async function cmdStatus() {
+  console.log("\n  AgentLink Status\n");
+
+  const state = readState();
+  const installed = isPluginInstalled();
+  const brokerUrl = getBrokerUrl();
+
+  info(`Plugin:   ${installed ? "installed" : "not installed"}`);
+  info(`Agent ID: ${state.agent_id || "(not set — run agentlink setup)"}`);
+  info(`Broker:   ${brokerUrl}`);
+  info(`Data dir: ${AGENTLINK_DIR}`);
+
+  // Active groups
+  const groups = state.groups ? Object.keys(state.groups) : [];
+  info(`Groups:   ${groups.length > 0 ? groups.length + " active" : "none"}`);
+  for (const gid of groups) {
+    const g = state.groups[gid];
+    info(`  ${gid.slice(0, 8)}  goal="${g.goal || "(none)"}"  participants=${(g.participants || []).length}  driver=${g.driver === state.agent_id ? "you" : g.driver}`);
+  }
+
+  // Pending jobs
+  const jobs = state.pending_jobs ? Object.keys(state.pending_jobs) : [];
+  if (jobs.length > 0) {
+    info(`Jobs:     ${jobs.length} pending`);
+  }
+
+  // Contacts
+  const contacts = readContacts();
+  const contactNames = Object.keys(contacts);
+  info(`Contacts: ${contactNames.length > 0 ? contactNames.join(", ") : "none"}`);
+
+  // Broker check
+  info("");
+  info("Checking broker...");
+  const result = await checkBrokerConnectivity(brokerUrl);
+  if (result.ok) {
+    success("Broker reachable");
+  } else {
+    warn(`Broker unreachable: ${result.error}`);
+  }
+  console.log("");
+}
+
+// ---------------------------------------------------------------------------
+// Contacts command
+// ---------------------------------------------------------------------------
+
+function cmdContacts(args) {
+  const sub = args[0];
+
+  if (sub === "add") {
+    const name = args[1];
+    const agentId = args[2];
+    if (!name || !agentId) {
+      fatal("Usage: agentlink contacts add <name> <agent-id>");
+    }
+    const contacts = readContacts();
+    contacts[name] = {
+      agent_id: agentId,
+      added: new Date().toISOString().split("T")[0],
+    };
+    fs.mkdirSync(AGENTLINK_DIR, { recursive: true });
+    fs.writeFileSync(CONTACTS_FILE, JSON.stringify({ contacts }, null, 2));
+    success(`Added ${name} -> ${agentId}`);
+    return;
+  }
+
+  if (sub === "remove" || sub === "rm") {
+    const name = args[1];
+    if (!name) {
+      fatal("Usage: agentlink contacts remove <name>");
+    }
+    const contacts = readContacts();
+    if (!(name in contacts)) {
+      warn(`Contact "${name}" not found.`);
+      return;
+    }
+    delete contacts[name];
+    fs.writeFileSync(CONTACTS_FILE, JSON.stringify({ contacts }, null, 2));
+    success(`Removed ${name}`);
+    return;
+  }
+
+  // Default: list
+  const contacts = readContacts();
+  const entries = Object.entries(contacts);
+  if (entries.length === 0) {
+    console.log("\n  No contacts.\n");
+    console.log("  Add one: agentlink contacts add <name> <agent-id>\n");
+    return;
+  }
+  console.log("\n  Contacts:\n");
+  for (const [name, entry] of entries) {
+    info(`${name.padEnd(20)} ${entry.agent_id.padEnd(40)} added ${entry.added}`);
+  }
+  console.log("");
+}
+
+// ---------------------------------------------------------------------------
 // Usage
 // ---------------------------------------------------------------------------
 
@@ -361,6 +526,10 @@ function printUsage() {
   Commands:
     setup       Install and configure AgentLink for OpenClaw
     uninstall   Remove AgentLink configuration (preserves identity)
+    status      Show agent identity, broker connectivity, active groups
+    contacts    List known contacts
+    contacts add <name> <agent-id>    Add a contact
+    contacts remove <name>            Remove a contact
 
   Setup options:
     --join CODE   Join a coordination group after setup
@@ -382,6 +551,12 @@ async function main() {
       break;
     case "uninstall":
       await cmdUninstall();
+      break;
+    case "status":
+      await cmdStatus();
+      break;
+    case "contacts":
+      cmdContacts(args.slice(1));
       break;
     default:
       printUsage();
