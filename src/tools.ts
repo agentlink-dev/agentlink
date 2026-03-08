@@ -170,7 +170,7 @@ export function createTools(
       const invited: string[] = [];
       for (const r of known) {
         await invites.sendDirectInvite(r.agentId!, groupId, goal, doneWhen);
-        log(`Invite sent to ${r.name}`);
+        logger.info(`[AgentLink] Invite sent to ${r.name}`);
         invited.push(r.name);
       }
 
@@ -179,7 +179,7 @@ export function createTools(
       for (const r of unknown) {
         const result = await invites.createInviteCode(groupId, config.agent.id, goal);
         inviteCodes.push({ name: r.name, code: result.code, message: result.shareableMessage });
-        log(`Invite code ${result.code} created for ${r.name}`);
+        logger.info(`[AgentLink] Invite code ${result.code} created for ${r.name}`);
       }
 
       const result: Record<string, unknown> = { group_id: groupId };
