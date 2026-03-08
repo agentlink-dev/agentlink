@@ -40,8 +40,10 @@ export function shouldProcess(
   // Always process if addressed to us directly
   if (msg.to === myAgentId) return true;
 
-  // If broadcast with capability filter: only process if we have the capability
+  // If broadcast with capability filter: process if we have the capability
+  // OR if we have no capabilities at all (LLM fallback mode — accept everything)
   if (msg.to === "group" && msg.payload.capability) {
+    if (myCapabilities.length === 0) return true;
     return myCapabilities.some((c) => c.name === msg.payload.capability);
   }
 

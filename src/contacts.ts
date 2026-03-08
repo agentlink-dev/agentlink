@@ -35,7 +35,14 @@ export function createContacts(dataDir: string): ContactsManager {
   return {
     resolve(nameOrId) {
       const contacts = load();
+      // Exact match
       if (contacts[nameOrId]) return contacts[nameOrId].agent_id;
+      // Case-insensitive match on contact name
+      const lower = nameOrId.toLowerCase();
+      for (const [name, entry] of Object.entries(contacts)) {
+        if (name.toLowerCase() === lower) return entry.agent_id;
+      }
+      // Exact match on agent_id
       for (const entry of Object.values(contacts)) {
         if (entry.agent_id === nameOrId) return nameOrId;
       }

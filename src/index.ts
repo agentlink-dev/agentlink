@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import nodePath from "node:path";
 import type { AgentLinkConfig } from "./types.js";
-import { resolveConfig, parseIdentityMd } from "./types.js";
+import { resolveConfig, parseIdentityMd, createEnvelope, TOPICS } from "./types.js";
 import { createContacts } from "./contacts.js";
 import { createState } from "./state.js";
 import { createMqttService } from "./mqtt-service.js";
@@ -66,7 +66,10 @@ function register(api: PluginApi) {
   if (!config.agent.displayName) {
     try {
       const ocConfig = api.config as Record<string, unknown>;
-      const workspacePath = (ocConfig.workspace as Record<string, unknown>)?.path as string | undefined;
+      // OC stores workspace at agents.defaults.workspace
+      const agents = ocConfig.agents as Record<string, unknown> | undefined;
+      const defaults = agents?.defaults as Record<string, unknown> | undefined;
+      const workspacePath = defaults?.workspace as string | undefined;
       if (workspacePath) {
         const identityPath = nodePath.join(workspacePath, "IDENTITY.md");
         if (fs.existsSync(identityPath)) {
@@ -325,6 +328,34 @@ function register(api: PluginApi) {
             if (!contacts.resolve(invite.from)) {
               contacts.add(invite.from, invite.from);
             }
+
+            // Publish status + join event so the driver knows we joined
+            const status = {
+              agent_id: config.agent.id,
+              owner: config.agent.description?.split("'s")[0] ?? config.agent.id,
+              display_name: config.agent.displayName,
+              status: "online",
+              capabilities: config.agent.capabilities.map((c) => ({
+                name: c.name,
+                description: c.description ?? c.name,
+                input_hint: c.input_hint ?? "",
+              })),
+              description: config.agent.description,
+              ts: new Date().toISOString(),
+            };
+            await mqttService.publish(
+              TOPICS.groupStatus(groupId, config.agent.id),
+              JSON.stringify(status),
+              { retain: true },
+            );
+            const joinMsg = createEnvelope(config.agent.id, {
+              group_id: groupId,
+              to: "group",
+              type: "join",
+              payload: { text: `${config.agent.id} joined the group` },
+            });
+            await mqttService.publishEnvelope(TOPICS.groupSystem(groupId), joinMsg);
+
             state.removePendingJoin(code);
             log(`Auto-joined group from setup: ${code}`);
           } else {
