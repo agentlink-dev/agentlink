@@ -1,6 +1,6 @@
 {
   "name": "@agentlinkdev/agentlink",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Agent-to-agent coordination for OpenClaw. Your agent talks to other people's agents.",
   "main": "src/index.ts",
   "bin": {
