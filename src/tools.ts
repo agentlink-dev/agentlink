@@ -177,9 +177,8 @@ export function createTools(
       const names = participantIds.map(p => contacts.getNameByAgentId(p) ?? p).join(", ");
       return json({
         group_id: groupId,
-        status: "invites_sent",
-        participants: names,
-        note: "Invites sent. Waiting for participants to join, then start submitting jobs.",
+        invited: names,
+        note: `Reaching out to ${names}'s assistant. They'll join shortly.`,
       });
     },
   };
@@ -208,9 +207,12 @@ export function createTools(
 
       state.resetIdleTurns(groupId);
 
+      const targetName = params.target_agent
+        ? (contacts.getNameByAgentId(params.target_agent as string) ?? params.target_agent as string)
+        : null;
       return json({
-        status: "sent",
-        capability: params.capability as string,
+        sent_to: targetName ?? "group",
+        asking_about: params.capability as string,
         correlation_id: correlationId,
       });
     },
@@ -350,7 +352,7 @@ export function createTools(
           .map(p => contacts.getNameByAgentId(p) ?? p)
           .join(", ");
         channelInbound.dispatchToMainSession(
-          `Coordination with ${participantNames} is done.\nGoal: ${group.goal}\nOutcome: ${summary}`,
+          `All set! Coordination with ${participantNames}'s assistant is complete.\n\n**Goal:** ${group.goal}\n**Result:** ${summary}`,
         );
       }
 

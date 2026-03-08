@@ -111,8 +111,9 @@ function register(api: PluginApi) {
         const name = contacts.getNameByAgentId(msg.from) ?? msg.from;
         const cap = msg.payload.capability ?? "unknown";
         const result = msg.payload.result ?? msg.payload.text ?? "(no text)";
+        const displayName = name.charAt(0).toUpperCase() + name.slice(1);
         channelInbound.dispatch(msg.group_id,
-          `**${name}** (${cap}): ${result}`,
+          `**${displayName}'s Assistant:** ${result}`,
           msg.from);
       }
       return;
@@ -123,8 +124,9 @@ function register(api: PluginApi) {
       const group = state.getGroup(msg.group_id);
       if (group && group.driver === config.agent.id) {
         const name = contacts.getNameByAgentId(msg.from) ?? msg.from;
+        const displayName = name.charAt(0).toUpperCase() + name.slice(1);
         channelInbound.dispatch(msg.group_id,
-          `**${name}**: ${msg.payload.text ?? "(no text)"}`,
+          `**${displayName}'s Assistant:** ${msg.payload.text ?? "(no text)"}`,
           msg.from);
         return;
       }
@@ -197,14 +199,18 @@ function register(api: PluginApi) {
         const capList = caps && caps.length > 0
           ? caps.map(c => `- **${c.name}**: ${c.description}`).join("\n")
           : "(capabilities loading...)";
-        channelInbound.dispatch(groupId, [
-          `**${name}** joined. Goal: "${group.goal}" | Done when: "${group.done_when}"`,
+
+        const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+        // Empty body = invisible "You" bubble. Agent gets full context via agentBody.
+        const agentContext = [
+          `${displayName}'s Assistant joined. Goal: "${group.goal}" | Done when: "${group.done_when}"`,
           ``,
-          `Their capabilities:`,
+          `What they can help with:`,
           capList,
           ``,
-          `Start by submitting jobs to ${name} using agentlink_submit_job with group_id "${groupId}".`,
-        ].join("\n"), from);
+          `[System] Submit ALL needed jobs NOW using agentlink_submit_job (group_id: "${groupId}"). Do NOT output any text — only tool calls.`,
+        ].join("\n");
+        channelInbound.dispatch(groupId, "", from, agentContext);
       }
     }
 
@@ -218,8 +224,9 @@ function register(api: PluginApi) {
         if (channelInbound && group.driver !== config.agent.id) {
           const name = contacts.getNameByAgentId(from) ?? from;
           const summary = (envelope.payload as Record<string, unknown>)?.text as string ?? "";
+          const displayName = name.charAt(0).toUpperCase() + name.slice(1);
           channelInbound.dispatch(groupId,
-            `Coordination complete — ${name}: ${summary}`,
+            `Coordination wrapped up by ${displayName}'s Assistant. ${summary}`,
             from);
         }
         mqttService.unsubscribeGroup(groupId);
@@ -287,7 +294,7 @@ function register(api: PluginApi) {
     api.registerChannel({ plugin: channelPlugin });
   }
 
-  // Anti-deadlock system prompt injection
+  // System prompt injection — shapes agent persona during coordination
   if (api.on) {
     api.on("before_prompt_build", () => {
       const activeGroups = state.getActiveGroups();
@@ -299,27 +306,39 @@ function register(api: PluginApi) {
 
       if (driverGroups.length === 0) return {};
 
-      let prompt = "\n\n## AgentLink Coordination (MANDATORY)\n\n";
-      prompt += "You are coordinating with other agents. Follow these rules:\n\n";
-      prompt += "### Execution\n";
-      prompt += "- Submit direct jobs (agentlink_submit_job) to get information — don't ask vague questions\n";
-      prompt += "- Make concrete proposals with specifics (time, place, price)\n";
-      prompt += "- After 3 idle turns, force progress with a job or complete\n";
-      prompt += "- Call agentlink_complete immediately when done_when is met\n\n";
-      prompt += "### Presentation (CRITICAL)\n";
-      prompt += "- Work efficiently. Call tools without announcing each step.\n";
-      prompt += "- NEVER say things like \"Waiting for response...\", \"Let me submit a job...\", \"I'm checking...\" — just do it.\n";
-      prompt += "- Present results as clean, conversational updates. Show the OUTCOME, not the process.\n";
-      prompt += "- When you get responses from participants, summarize the key findings naturally.\n";
-      prompt += "- Keep messages short and polished. This conversation is visible to the user.\n\n";
+      let prompt = "\n\n## AgentLink — Assistant-to-Assistant Coordination\n\n";
+      prompt += "You are your human's personal assistant. You are in a GROUP CHAT with other people's assistants, ";
+      prompt += "coordinating on your human's behalf. Your human delegated this to you and is watching.\n\n";
+
+      prompt += "### Rules (MANDATORY — follow exactly)\n";
+      prompt += "**Step 1:** When a participant joins, IMMEDIATELY submit ALL jobs you need (preferences, availability, etc.) in ONE turn. No text output — just tool calls.\n";
+      prompt += "**Step 2:** When responses arrive, write ONE short summary and IMMEDIATELY call `agentlink_complete` in the SAME turn.\n";
+      prompt += "**Step 3:** There is no step 3. Two turns maximum. Do NOT send additional jobs asking for confirmation or clarification.\n\n";
+
+      prompt += "### Decision authority\n";
+      prompt += "- You have FULL authority to make decisions. Pick specific times, places, and options yourself.\n";
+      prompt += "- If someone says \"I'm free Saturday from 6pm\", pick Saturday 6pm. Don't ask them to pick.\n";
+      prompt += "- If someone gives a range, choose the first available option. Don't negotiate.\n";
+      prompt += "- NEVER submit a second round of jobs. Gather → Decide → Complete.\n\n";
+
+      prompt += "### Voice\n";
+      prompt += "Speak in first person as your human's assistant:\n";
+      prompt += "- \"I checked with Bob's assistant — he's free Saturday evening and loves Italian. I'd suggest Trattoria on Main St at 6pm.\"\n";
+      prompt += "NEVER narrate process, ask questions, or say \"waiting for\" / \"let me check\".\n\n";
 
       for (const group of driverGroups) {
         if (!group) continue;
-        prompt += `### Active: "${group.goal}"\n`;
-        prompt += `Done when: ${group.done_when} | Turns: ${group.idle_turns}/3\n`;
+        const participantNames = group.participants
+          .filter(p => p !== config.agent.id)
+          .map(p => contacts.getNameByAgentId(p) ?? p)
+          .join(", ");
+        prompt += `### Coordinating with ${participantNames ? participantNames + "'s assistant" : "other assistants"}\n`;
+        prompt += `**Goal:** ${group.goal}\n`;
+        prompt += `**Done when:** ${group.done_when}\n`;
         if (group.idle_turns >= 3) {
-          prompt += `⚠️ 3 idle turns — take concrete action NOW.\n`;
+          prompt += `⚠️ Progress stalled — take concrete action or complete now.\n`;
         }
+        prompt += "\n";
       }
 
       return { appendSystemContext: prompt };

@@ -134,14 +134,16 @@ export function createChannelPlugin(
 // ---------------------------------------------------------------------------
 
 export interface ChannelInbound {
-  dispatch(groupId: string, body: string, senderAgentId?: string): void;
+  /** Dispatch an event to the agent. body = user-visible, agentBody = LLM-visible (defaults to body). */
+  dispatch(groupId: string, body: string, senderAgentId?: string, agentBody?: string): void;
   dispatchToMainSession(body: string): void;
   clearWatchdog(groupId: string): void;
   shutdown(): void;
 }
 
 const DEBOUNCE_MS = 1500;
-const WATCHDOG_MS = 20_000; // re-dispatch if no activity for 20s
+const WATCHDOG_MS = 10_000; // re-dispatch if no activity for 10s
+const MAX_NUDGES = 3; // auto-complete after this many watchdog nudges
 
 export function createChannelInbound(
   config: AgentLinkConfig,
@@ -163,6 +165,7 @@ export function createChannelInbound(
 
   // Watchdog: re-dispatch if a group goes idle (agent sent chat but no job → no response)
   const watchdogTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const nudgeCounts = new Map<string, number>();
 
   function resetWatchdog(groupId: string) {
     const existing = watchdogTimers.get(groupId);
@@ -172,23 +175,40 @@ export function createChannelInbound(
       watchdogTimers.delete(groupId);
       const group = state.getGroup(groupId);
       if (!group || group.driver !== config.agent.id) return;
-      logger.info(`[AgentLink] Watchdog: group ${groupId.slice(0, 8)} idle for ${WATCHDOG_MS / 1000}s, nudging agent`);
-      enqueueDispatch(groupId, () => doDispatch(groupId,
-        `No response yet. Submit a job to move forward, or call agentlink_complete if the goal is met.`,
-      ));
+
+      const nudgeCount = (nudgeCounts.get(groupId) ?? 0) + 1;
+      nudgeCounts.set(groupId, nudgeCount);
+      logger.info(`[AgentLink] Watchdog: group ${groupId.slice(0, 8)} idle ${WATCHDOG_MS / 1000}s, nudge #${nudgeCount}`);
+
+      if (nudgeCount >= MAX_NUDGES) {
+        // Auto-complete: the model won't do it, so we force it
+        logger.info(`[AgentLink] Auto-completing group ${groupId.slice(0, 8)} after ${nudgeCount} nudges`);
+        nudgeCounts.delete(groupId);
+        enqueueDispatch(groupId, () => doDispatch(groupId, "",
+          undefined,
+          `[System] Coordination auto-completed. Summarize what you gathered and present your recommendation to the user.`,
+        ));
+        return;
+      }
+
+      // Invisible nudge — empty body for user, actionable for agent
+      const nudgeText = nudgeCount === 1
+        ? `[System] Submit jobs to gather info, or call agentlink_complete if the goal is met. Only tool calls — no text.`
+        : `[System] You already have the info you need. Call agentlink_complete NOW with your recommendation. Do NOT submit more jobs.`;
+      enqueueDispatch(groupId, () => doDispatch(groupId, "", undefined, nudgeText));
     }, WATCHDOG_MS));
   }
 
   // Debounce: coalesce rapid events per group into one inbound message
-  const pendingEvents = new Map<string, Array<{ body: string; senderAgentId?: string }>>();
+  const pendingEvents = new Map<string, Array<{ body: string; senderAgentId?: string; agentBody?: string }>>();
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  function scheduleDebounced(groupId: string, body: string, senderAgentId?: string) {
+  function scheduleDebounced(groupId: string, body: string, senderAgentId?: string, agentBody?: string) {
     // Any inbound event resets the watchdog (activity detected)
     resetWatchdog(groupId);
 
     if (!pendingEvents.has(groupId)) pendingEvents.set(groupId, []);
-    pendingEvents.get(groupId)!.push({ body, senderAgentId });
+    pendingEvents.get(groupId)!.push({ body, senderAgentId, agentBody });
 
     const existing = debounceTimers.get(groupId);
     if (existing) clearTimeout(existing);
@@ -199,12 +219,15 @@ export function createChannelInbound(
       debounceTimers.delete(groupId);
       if (events.length === 0) return;
 
-      const combined = events.length === 1
-        ? events[0].body
-        : events.map(e => e.body).join("\n\n");
+      // User-visible body: only include non-empty bodies (skip system events)
+      const visibleBodies = events.map(e => e.body).filter(b => b.length > 0);
+      const combinedBody = visibleBodies.join("\n\n");
+
+      // Agent-visible body: include everything (agentBody fallback to body)
+      const combinedAgent = events.map(e => e.agentBody ?? e.body).join("\n\n");
       const lastSender = events.at(-1)?.senderAgentId;
 
-      enqueueDispatch(groupId, () => doDispatch(groupId, combined, lastSender).then(() => {
+      enqueueDispatch(groupId, () => doDispatch(groupId, combinedBody, lastSender, combinedAgent).then(() => {
         // Restart watchdog after dispatch completes (agent turn done, waiting for response)
         resetWatchdog(groupId);
       }));
@@ -212,10 +235,14 @@ export function createChannelInbound(
   }
 
   // Core dispatch: build MsgContext, record session, dispatch to agent
-  async function doDispatch(groupId: string, body: string, senderAgentId?: string) {
+  async function doDispatch(groupId: string, body: string, senderAgentId?: string, agentBody?: string) {
     const senderName = senderAgentId
       ? (contacts.getNameByAgentId(senderAgentId) ?? senderAgentId)
       : "system";
+
+    // Use group goal as session label (shown in OC sidebar)
+    const group = state.getGroup(groupId);
+    const sessionLabel = group?.goal ?? `Group ${groupId.slice(0, 8)}`;
 
     logger.info(`[AgentLink] doDispatch: group=${groupId.slice(0, 8)}, from=${senderName}, body=${body.slice(0, 80)}...`);
 
@@ -229,9 +256,11 @@ export function createChannelInbound(
       });
 
       // 2. Build + finalize inbound context
+      // Body = user-visible (shown in chat UI). Empty string hides the "You" bubble.
+      // BodyForAgent = what the LLM sees (may include system context invisible to user).
       const ctx = channelApi.reply.finalizeInboundContext({
-        Body: body,
-        BodyForAgent: body,
+        Body: body || " ",
+        BodyForAgent: agentBody ?? body,
         SessionKey: route.sessionKey,
         From: `agentlink:${senderAgentId ?? "system"}`,
         To: `agentlink:${config.agent.id}`,
@@ -239,7 +268,7 @@ export function createChannelInbound(
         Surface: "agentlink",
         OriginatingChannel: "agentlink",
         OriginatingTo: groupId,
-        SenderName: senderName,
+        SenderName: sessionLabel,
         SenderId: senderAgentId ?? "system",
         ChatType: "group",
         CommandAuthorized: true,
@@ -260,21 +289,16 @@ export function createChannelInbound(
       });
 
       // 4. Dispatch — agent wakes up and processes the event
+      // NOTE: We intentionally do NOT send the agent's text response to MQTT.
+      // The agent coordinates via tool calls (submit_job, complete), not chat.
+      // This prevents narration/filler text from flooding the group channel.
       await channelApi.reply.dispatchReplyWithBufferedBlockDispatcher({
         ctx,
         cfg: ocConfig,
         dispatcherOptions: {
-          deliver: async (payload, info) => {
-            if (info.kind !== "final") return;
-            if (!payload.text) return;
-            // Send agent's response to MQTT group as chat message
-            const envelope = createEnvelope(config.agent.id, {
-              group_id: groupId,
-              to: "group",
-              type: "chat",
-              payload: { text: payload.text },
-            });
-            await mqtt.publishEnvelope(TOPICS.groupMessages(groupId, config.agent.id), envelope);
+          deliver: async (_payload, _info) => {
+            // Agent's text appears in OC chat UI but is NOT relayed to MQTT group.
+            // Coordination happens via agentlink_submit_job and agentlink_complete tools.
           },
           onError: (err, info) => {
             logger.warn(`[AgentLink] dispatch ${info.kind} error for group ${groupId}: ${err}`);
@@ -352,6 +376,7 @@ export function createChannelInbound(
     clearWatchdog(groupId: string) {
       const timer = watchdogTimers.get(groupId);
       if (timer) { clearTimeout(timer); watchdogTimers.delete(groupId); }
+      nudgeCounts.delete(groupId);
     },
     shutdown() {
       for (const timer of debounceTimers.values()) clearTimeout(timer);
@@ -359,6 +384,7 @@ export function createChannelInbound(
       debounceTimers.clear();
       watchdogTimers.clear();
       pendingEvents.clear();
+      nudgeCounts.clear();
     },
   };
 }
