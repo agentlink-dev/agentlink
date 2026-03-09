@@ -307,7 +307,11 @@ export function formatInboundMessage(
     "Respond naturally — your text response will be captured and sent back automatically.",
     "IMPORTANT: Do NOT use the agentlink_message tool to reply in this conversation.",
     "Just respond with text. The system handles delivery.",
-    "Use your other tools and knowledge to answer their questions.",
+    "",
+    "Use ALL your tools (calendar, skills, exec, etc.) to give accurate answers.",
+    "If a tool call fails, read the relevant skill file with the read tool (NOT exec) and retry.",
+    "When using exec, run simple commands without shell redirects (no 2>/dev/null, no pipes, no ||).",
+    "Do NOT fall back to guessing or memory when tools are available — use them.",
   ];
 
   if (a2aContext) {
