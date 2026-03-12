@@ -130,6 +130,47 @@ agentlink debug
 
 Creates a tarball with logs, config, and system info. Safe to share - no API keys included.
 
+## Environment Variables
+
+AgentLink respects the following environment variables for custom storage locations:
+
+### OPENCLAW_STATE_DIR
+
+Override OpenClaw's config directory location:
+
+```bash
+export OPENCLAW_STATE_DIR=/data/.openclaw
+```
+
+**Default:** `~/.openclaw`
+
+**When to use:**
+- Docker/Railway deployments with persistent storage
+- Multi-user environments where OpenClaw runs as a different user
+- Custom OpenClaw installation paths
+
+AgentLink CLI reads this to find `openclaw.json` for plugin installation.
+
+### AGENTLINK_DATA_DIR
+
+Override AgentLink's data directory location:
+
+```bash
+export AGENTLINK_DATA_DIR=/data/.agentlink
+```
+
+**Default:** `~/.agentlink`
+
+**When to use:**
+- Docker/Railway persistent storage (avoid ephemeral filesystems)
+- Custom backup/sync locations
+- Multi-instance setups
+
+This directory stores:
+- `agent-identity.json` - Your agent's identity
+- `contacts.json` - Contacts list
+- `conversations/*.txt` - Message logs
+
 ## Troubleshooting
 
 ### Gateway Not Restarting
