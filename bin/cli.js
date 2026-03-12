@@ -16,10 +16,15 @@ import readline from "node:readline";
 import pc from "picocolors";
 import ora from "ora";
 import { WebSocket } from "ws";
+import mqtt from "mqtt";
 
-const DATA_DIR = path.join(os.homedir(), ".agentlink");
+// Respect OpenClaw environment variables (set by Railway/Docker, not by homebrew)
+const OPENCLAW_STATE_DIR = process.env.OPENCLAW_STATE_DIR || path.join(os.homedir(), ".openclaw");
+const OC_CONFIG_PATH = path.join(OPENCLAW_STATE_DIR, "openclaw.json");
+
+// AgentLink data directory (can be overridden)
+const DATA_DIR = process.env.AGENTLINK_DATA_DIR || path.join(os.homedir(), ".agentlink");
 const IDENTITY_FILE = path.join(DATA_DIR, "identity.json");
-const OC_CONFIG_PATH = path.join(os.homedir(), ".openclaw", "openclaw.json");
 
 const ID_CHARSET = "abcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -547,6 +552,88 @@ function uninstall() {
   });
 }
 
+function generateInviteCode() {
+  const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // No ambiguous chars
+  return Array.from({ length: 6 }, () =>
+    charset[Math.floor(Math.random() * charset.length)]
+  ).join("");
+}
+
+async function generateInvite(recipientName) {
+  console.log("\n" + pc.bold(pc.blue("  📞 AgentLink Invite Generator")) + "\n");
+
+  // Check if AgentLink is set up
+  const identityPath = path.join(DATA_DIR, "identity.json");
+  if (!fs.existsSync(identityPath)) {
+    console.log(pc.red("  ✗ AgentLink not set up"));
+    console.log(pc.dim("  Run: agentlink setup\n"));
+    process.exit(1);
+  }
+
+  const identity = JSON.parse(fs.readFileSync(identityPath, "utf-8"));
+  const senderName = identity.human_name || "sender";
+  const recipient = recipientName || "recipient";
+
+  const spinner = ora("Generating invite...").start();
+
+  // Generate invite
+  const code = generateInviteCode();
+  const expires = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
+  const invite = {
+    code,
+    from: identity.agent_id,
+    human_name: identity.human_name,
+    expires,
+  };
+
+  // Publish to MQTT
+  const brokerUrl = "mqtt://broker.emqx.io:1883";
+  const client = mqtt.connect(brokerUrl);
+
+  await new Promise((resolve, reject) => {
+    client.on("connect", () => {
+      const topic = `agentlink/invites/${code}`;
+      client.publish(topic, JSON.stringify(invite), { retain: true, qos: 1 }, (err) => {
+        client.end();
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    client.on("error", reject);
+    setTimeout(() => reject(new Error("MQTT connection timeout")), 10000);
+  });
+
+  spinner.succeed("Invite generated");
+
+  // Get landing page URL (use default Vercel deployment)
+  const landingPageBase = "https://website-agentlink.vercel.app";
+  const inviteUrl = `${landingPageBase}/join/${code}.txt`;
+
+  // Installation message for recipient
+  const installMessage = [
+    `Hi OpenClaw, I would like to install AgentLink. It allows you, my agent, to talk to other OpenClaws — so you can schedule stuff, share context, and coordinate without us going back and forth.`,
+    ``,
+    `AgentLink is a peer-to-peer messaging plugin (like WhatsApp for AI agents).`,
+    `No credentials shared. Messages are direct over MQTT.`,
+    ``,
+    `Get started: ${inviteUrl}`,
+    `(Takes 30 seconds)`,
+  ].join("\n");
+
+  // Display formatted message
+  console.log("");
+  console.log(pc.bold(`  Here's your AgentLink invite for ${pc.cyan(recipient)}.\n`));
+  console.log(pc.dim("  ───────────────────────────────────────────\n"));
+  console.log(pc.bold(`  Instructions for ${senderName}:`), `Please send the whole message below to ${recipient}.\n`);
+  console.log(pc.dim("  ───────────────────────────────────────────\n"));
+  console.log(pc.bold(`  Instructions for ${recipient}:`), `Please paste the installation message below in your OpenClaw.\n`);
+  console.log(pc.dim("  ───────────────────────────────────────────\n"));
+  console.log("  " + installMessage.split("\n").join("\n  "));
+  console.log("");
+  console.log(pc.dim("  ───────────────────────────────────────────\n"));
+  console.log(pc.bold(`  Invite code: ${pc.cyan(code)}`), pc.dim(`(expires ${new Date(expires).toLocaleDateString()})\n`));
+}
+
 async function exportDebugLogs() {
   console.log("\n" + pc.bold(pc.blue("  📦 AgentLink Debug Export")) + "\n");
 
@@ -796,6 +883,10 @@ if (command === "setup") {
   const agentNameArg = agentNameIdx >= 0 ? args[agentNameIdx + 1] : undefined;
 
   setup(joinCode, humanNameArg, agentNameArg);
+} else if (command === "invite") {
+  const recipientIdx = args.indexOf("--recipient-name");
+  const recipientName = recipientIdx >= 0 ? args[recipientIdx + 1] : undefined;
+  await generateInvite(recipientName);
 } else if (command === "reset") {
   reset();
 } else if (command === "uninstall") {
@@ -807,6 +898,8 @@ if (command === "setup") {
   console.log("  Commands:");
   console.log("    " + pc.cyan("agentlink setup [--join CODE] [--human-name NAME] [--agent-name NAME]"));
   console.log("      " + pc.dim("Set up AgentLink and optionally join with an invite code\n"));
+  console.log("    " + pc.cyan("agentlink invite [--recipient-name NAME]"));
+  console.log("      " + pc.dim("Generate an invite code to share with someone\n"));
   console.log("    " + pc.cyan("agentlink reset"));
   console.log("      " + pc.dim("Clear AgentLink data (keeps plugin installed)\n"));
   console.log("    " + pc.cyan("agentlink uninstall"));
@@ -816,6 +909,7 @@ if (command === "setup") {
   console.log("  Examples:");
   console.log("    " + pc.cyan("agentlink setup"));
   console.log("    " + pc.cyan("agentlink setup --join ABC123 --human-name \"Alice\" --agent-name \"Agent A\""));
+  console.log("    " + pc.cyan("agentlink invite --recipient-name \"Bob\""));
   console.log("    " + pc.cyan("agentlink reset"));
   console.log("    " + pc.cyan("agentlink uninstall"));
   console.log("    " + pc.cyan("agentlink debug") + "\n");
