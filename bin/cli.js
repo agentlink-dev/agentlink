@@ -15,6 +15,7 @@ import os from "node:os";
 import readline from "node:readline";
 import pc from "picocolors";
 import ora from "ora";
+import { WebSocket } from "ws";
 
 const DATA_DIR = path.join(os.homedir(), ".agentlink");
 const IDENTITY_FILE = path.join(DATA_DIR, "identity.json");
@@ -169,6 +170,64 @@ function detectIdentity() {
   };
 }
 
+async function waitForGatewayRestart(maxWaitSeconds = 120) {
+  const gatewayUrl = "ws://127.0.0.1:18789"; // TODO: Detect port from config
+  const startTime = Date.now();
+  const maxWaitMs = maxWaitSeconds * 1000;
+
+  console.log(pc.dim(`\nWaiting for gateway restart (max ${maxWaitSeconds}s)...`));
+  console.log(pc.dim(`You can manually restart with: openclaw gateway stop && openclaw gateway`));
+
+  const spinner = ["|", "/", "-", "\\"];
+  let spinnerIdx = 0;
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      // Try to connect to gateway WS endpoint
+      const ws = new WebSocket(gatewayUrl);
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("timeout")), 2000);
+
+        ws.on('open', () => {
+          clearTimeout(timeout);
+          ws.close();
+          resolve(true);
+        });
+
+        ws.on('error', () => {
+          clearTimeout(timeout);
+          reject(new Error("connection failed"));
+        });
+      });
+
+      // Gateway is up!
+      console.log(pc.green(`\n✓ Gateway restarted successfully`));
+
+      // Wait a bit for plugin to load
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Verify AgentLink loaded (check if identity.json exists and was processed)
+      const identityPath = path.join(os.homedir(), ".agentlink", "identity.json");
+      if (fs.existsSync(identityPath)) {
+        console.log(pc.green(`✓ AgentLink plugin loaded`));
+        return true;
+      }
+
+    } catch (err) {
+      // Not ready yet, keep waiting
+      process.stdout.write(`\r${spinner[spinnerIdx % 4]} Waiting... (${Math.floor((Date.now() - startTime) / 1000)}s)`);
+      spinnerIdx++;
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Poll every 2s
+    }
+  }
+
+  // Timeout reached
+  console.log(pc.yellow(`\n⚠ Timeout waiting for gateway restart`));
+  console.log(pc.yellow(`Please manually restart: openclaw gateway stop && openclaw gateway`));
+  return false;
+}
+
 async function setup(joinCode, humanNameArg, agentNameArg) {
   console.log("\n" + pc.bold("  AgentLink Setup") + "\n");
 
@@ -318,6 +377,9 @@ async function setup(joinCode, humanNameArg, agentNameArg) {
     process.exit(1);
   }
 
+  // Step 3.5: Watch for gateway restart
+  const restarted = await waitForGatewayRestart(120);
+
   // Step 4: Handle invite code (if provided)
   if (joinCode) {
     const pendingFile = path.join(DATA_DIR, "pending_join.json");
@@ -332,48 +394,391 @@ async function setup(joinCode, humanNameArg, agentNameArg) {
 
   // Viral loop prompt with clear next steps
   if (joinCode) {
-    box([
-      pc.bold(`✓ Connected with invite code ${joinCode}!`),
-      "",
-      "Next steps:",
-      "",
-      "1. Restart your gateway (required):",
-      pc.cyan("   openclaw gateway stop && openclaw gateway"),
-      "",
-      "2. After restart, an auto-hello is sent to the inviter",
-      "",
-      "3. Test it! Tell your agent:",
-      pc.cyan(`   "Message them: hey, just set up AgentLink!"`),
-    ]);
+    if (restarted) {
+      box([
+        pc.bold(`✓ Connected with invite code ${joinCode}!`),
+        "",
+        "Gateway has restarted and AgentLink is active.",
+        "An auto-hello will be sent to the inviter.",
+        "",
+        "Test it! Tell your agent:",
+        pc.cyan(`   "Message them: hey, just set up AgentLink!"`),
+      ]);
+    } else {
+      box([
+        pc.bold(`✓ Connected with invite code ${joinCode}!`),
+        "",
+        "Next steps:",
+        "",
+        "1. Restart your gateway manually:",
+        pc.cyan("   openclaw gateway stop && openclaw gateway"),
+        "",
+        "2. After restart, an auto-hello is sent to the inviter",
+        "",
+        "3. Test it! Tell your agent:",
+        pc.cyan(`   "Message them: hey, just set up AgentLink!"`),
+      ]);
+    }
   } else {
-    box([
-      pc.bold("✓ AgentLink is ready!"),
-      "",
-      "Next steps:",
-      "",
-      "1. Restart your gateway (required):",
-      pc.cyan("   openclaw gateway stop && openclaw gateway"),
-      "",
-      "2. Generate an invite to connect with someone:",
-      pc.cyan(`   "Generate an AgentLink invite for [Name]"`),
-    ]);
+    if (restarted) {
+      box([
+        pc.bold("✓ AgentLink is ready!"),
+        "",
+        "Gateway has restarted and AgentLink is active.",
+        "",
+        "Next step: Generate an invite to connect with someone:",
+        pc.cyan(`   "Generate an AgentLink invite for [Name]"`),
+      ]);
+    } else {
+      box([
+        pc.bold("✓ AgentLink is ready!"),
+        "",
+        "Next steps:",
+        "",
+        "1. Restart your gateway manually:",
+        pc.cyan("   openclaw gateway stop && openclaw gateway"),
+        "",
+        "2. Generate an invite to connect with someone:",
+        pc.cyan(`   "Generate an AgentLink invite for [Name]"`),
+      ]);
+    }
   }
   console.log("");
 }
 
-function uninstall() {
-  console.log("\n" + pc.bold("  AgentLink Uninstall") + "\n");
+function reset() {
+  console.log("\n" + pc.bold(pc.yellow("  ⚠ AgentLink Reset")) + "\n");
 
-  const spinner = ora("Removing plugin...").start();
-  try {
-    execSync("openclaw plugins uninstall @agentlinkdev/agentlink", { stdio: "pipe" });
-    spinner.succeed("Plugin removed");
-  } catch {
-    spinner.warn("Plugin may already be uninstalled");
+  const identityPath = path.join(DATA_DIR, "identity.json");
+  if (!fs.existsSync(identityPath)) {
+    console.log(pc.yellow("  No AgentLink installation found."));
+    process.exit(0);
   }
 
-  console.log(pc.green(`\n  ✓ Plugin removed. Identity preserved in ${DATA_DIR}`));
-  console.log(pc.dim(`  To fully remove: rm -rf ${DATA_DIR}\n`));
+  // Read current identity to show what's being reset
+  const identity = JSON.parse(fs.readFileSync(identityPath, "utf-8"));
+  console.log(pc.dim(`  Current agent: ${identity.agent_id}`));
+  console.log(pc.dim(`  Human: ${identity.human_name}\n`));
+
+  // Confirm
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  rl.question(pc.yellow("  Clear all AgentLink data? (y/N): "), (answer) => {
+    rl.close();
+
+    if (answer.toLowerCase() !== "y") {
+      console.log(pc.dim("  Reset cancelled.\n"));
+      process.exit(0);
+    }
+
+    // Clear data
+    console.log(pc.dim("\n  Removing:"));
+    const files = fs.readdirSync(DATA_DIR);
+    files.forEach(file => {
+      const filePath = path.join(DATA_DIR, file);
+      console.log(pc.dim(`    - ${file}`));
+      if (fs.lstatSync(filePath).isDirectory()) {
+        fs.rmSync(filePath, { recursive: true });
+      } else {
+        fs.unlinkSync(filePath);
+      }
+    });
+
+    console.log(pc.green("\n  ✓ AgentLink data cleared"));
+    console.log(pc.dim("  Plugin still installed in OpenClaw."));
+    console.log(pc.dim("  Run `agentlink setup` to reconfigure.\n"));
+  });
+}
+
+function uninstall() {
+  console.log("\n" + pc.bold(pc.yellow("  ⚠ AgentLink Uninstall")) + "\n");
+
+  // Check what's installed
+  const hasData = fs.existsSync(path.join(DATA_DIR, "identity.json"));
+  const hasPlugin = (() => {
+    try {
+      const result = execSync("openclaw plugins list", { encoding: "utf-8" });
+      return result.includes("agentlink");
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!hasData && !hasPlugin) {
+    console.log(pc.yellow("  No AgentLink installation found."));
+    process.exit(0);
+  }
+
+  console.log(pc.dim("  Will remove:"));
+  if (hasData) console.log(pc.dim(`    - AgentLink data (${DATA_DIR})`));
+  if (hasPlugin) console.log(pc.dim("    - AgentLink plugin from OpenClaw"));
+  console.log("");
+
+  // Confirm
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  rl.question(pc.yellow("  Completely remove AgentLink? (y/N): "), (answer) => {
+    rl.close();
+
+    if (answer.toLowerCase() !== "y") {
+      console.log(pc.dim("  Uninstall cancelled.\n"));
+      process.exit(0);
+    }
+
+    // Remove data
+    if (hasData) {
+      console.log(pc.dim("\n  Removing data directory..."));
+      fs.rmSync(DATA_DIR, { recursive: true, force: true });
+      console.log(pc.green("  ✓ Data removed"));
+    }
+
+    // Remove plugin
+    if (hasPlugin) {
+      console.log(pc.dim("  Removing plugin from OpenClaw..."));
+      try {
+        execSync("openclaw plugins uninstall agentlink", { stdio: "pipe" });
+        console.log(pc.green("  ✓ Plugin removed"));
+      } catch (err) {
+        console.log(pc.yellow("  ⚠ Plugin removal failed - you may need to remove manually"));
+        console.log(pc.dim("  Run: openclaw plugins uninstall agentlink"));
+      }
+    }
+
+    console.log(pc.green("\n  ✓ AgentLink completely removed"));
+    console.log(pc.dim("  Restart your gateway to apply changes.\n"));
+  });
+}
+
+async function exportDebugLogs() {
+  console.log("\n" + pc.bold(pc.blue("  📦 AgentLink Debug Export")) + "\n");
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const exportDir = path.join(os.tmpdir(), `agentlink-debug-${timestamp}`);
+  const exportName = `agentlink-debug-${timestamp}.tar.gz`;
+  const exportPath = path.join(os.homedir(), exportName);
+
+  // Create temp export directory
+  fs.mkdirSync(exportDir, { recursive: true });
+
+  const spinner = ora("Collecting diagnostic data...").start();
+  const manifest = [];
+
+  // 1. System Info
+  spinner.text = "Collecting system info...";
+  const systemInfo = {
+    timestamp: new Date().toISOString(),
+    platform: os.platform(),
+    arch: os.arch(),
+    osVersion: os.release(),
+    nodeVersion: process.version,
+    hostname: os.hostname(),
+    username: os.userInfo().username,
+  };
+
+  // Get OpenClaw version
+  try {
+    const ocVersion = execSync("openclaw --version", { encoding: "utf-8" }).trim();
+    systemInfo.openclawVersion = ocVersion;
+  } catch {
+    systemInfo.openclawVersion = "not found";
+  }
+
+  // Get AgentLink version
+  try {
+    const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "../package.json");
+    const pkgJson = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+    systemInfo.agentlinkVersion = pkgJson.version;
+  } catch {
+    systemInfo.agentlinkVersion = "unknown";
+  }
+
+  fs.writeFileSync(
+    path.join(exportDir, "system-info.json"),
+    JSON.stringify(systemInfo, null, 2)
+  );
+  manifest.push("system-info.json - System and version information");
+
+  // 2. AgentLink Data
+  spinner.text = "Copying AgentLink data...";
+  if (fs.existsSync(DATA_DIR)) {
+    const agentlinkExportDir = path.join(exportDir, "agentlink-data");
+    fs.mkdirSync(agentlinkExportDir);
+
+    // Copy identity
+    if (fs.existsSync(path.join(DATA_DIR, "identity.json"))) {
+      fs.copyFileSync(
+        path.join(DATA_DIR, "identity.json"),
+        path.join(agentlinkExportDir, "identity.json")
+      );
+      manifest.push("agentlink-data/identity.json - Agent identity");
+    }
+
+    // Copy contacts
+    if (fs.existsSync(path.join(DATA_DIR, "contacts.json"))) {
+      fs.copyFileSync(
+        path.join(DATA_DIR, "contacts.json"),
+        path.join(agentlinkExportDir, "contacts.json")
+      );
+      manifest.push("agentlink-data/contacts.json - Contact list");
+    }
+
+    // Copy conversation logs
+    const logsDir = path.join(DATA_DIR, "logs");
+    if (fs.existsSync(logsDir)) {
+      const logsExportDir = path.join(agentlinkExportDir, "logs");
+      fs.mkdirSync(logsExportDir);
+      const logFiles = fs.readdirSync(logsDir);
+      logFiles.forEach(file => {
+        fs.copyFileSync(
+          path.join(logsDir, file),
+          path.join(logsExportDir, file)
+        );
+      });
+      manifest.push(`agentlink-data/logs/ - ${logFiles.length} conversation log(s)`);
+    }
+  } else {
+    manifest.push("⚠ No AgentLink data found (~/.agentlink does not exist)");
+  }
+
+  // 3. OpenClaw Gateway Logs (filtered for AgentLink)
+  spinner.text = "Extracting OpenClaw logs...";
+  const ocLogPath = path.join(os.homedir(), ".openclaw/logs/gateway.log");
+  if (fs.existsSync(ocLogPath)) {
+    // Get last 500 lines of full log
+    try {
+      const fullLog = execSync(`tail -500 "${ocLogPath}"`, { encoding: "utf-8" });
+      fs.writeFileSync(
+        path.join(exportDir, "openclaw-gateway-recent.log"),
+        fullLog
+      );
+      manifest.push("openclaw-gateway-recent.log - Last 500 lines of gateway log");
+    } catch {}
+
+    // Filter for AgentLink-specific lines
+    try {
+      const agentlinkLog = execSync(`grep -i agentlink "${ocLogPath}" || true`, { encoding: "utf-8" });
+      fs.writeFileSync(
+        path.join(exportDir, "openclaw-agentlink-only.log"),
+        agentlinkLog
+      );
+      manifest.push("openclaw-agentlink-only.log - Gateway log filtered for AgentLink activity");
+    } catch {}
+  } else {
+    manifest.push("⚠ OpenClaw gateway log not found at ~/.openclaw/logs/gateway.log");
+  }
+
+  // 4. OpenClaw Config (AgentLink plugin section)
+  spinner.text = "Copying OpenClaw config...";
+  if (fs.existsSync(OC_CONFIG_PATH)) {
+    const ocConfig = JSON.parse(fs.readFileSync(OC_CONFIG_PATH, "utf-8"));
+
+    // Extract relevant sections
+    const relevantConfig = {
+      plugins: ocConfig.plugins || {},
+      tools: ocConfig.tools || {},
+      gateway: {
+        port: ocConfig.gateway?.port,
+        mode: ocConfig.gateway?.mode,
+        bind: ocConfig.gateway?.bind,
+      },
+    };
+
+    fs.writeFileSync(
+      path.join(exportDir, "openclaw-config-excerpt.json"),
+      JSON.stringify(relevantConfig, null, 2)
+    );
+    manifest.push("openclaw-config-excerpt.json - Relevant OpenClaw configuration");
+  } else {
+    manifest.push("⚠ OpenClaw config not found");
+  }
+
+  // 5. Generate README
+  spinner.text = "Generating README...";
+  const identity = fs.existsSync(path.join(DATA_DIR, "identity.json"))
+    ? JSON.parse(fs.readFileSync(path.join(DATA_DIR, "identity.json"), "utf-8"))
+    : null;
+
+  const contacts = fs.existsSync(path.join(DATA_DIR, "contacts.json"))
+    ? JSON.parse(fs.readFileSync(path.join(DATA_DIR, "contacts.json"), "utf-8"))
+    : null;
+
+  const readme = `# AgentLink Debug Export
+Generated: ${new Date().toISOString()}
+
+## System Information
+- Platform: ${systemInfo.platform} ${systemInfo.arch}
+- OS Version: ${systemInfo.osVersion}
+- Node.js: ${systemInfo.nodeVersion}
+- OpenClaw: ${systemInfo.openclawVersion}
+- AgentLink: ${systemInfo.agentlinkVersion}
+
+## Agent Information
+${identity ? `- Agent ID: ${identity.agent_id}
+- Human Name: ${identity.human_name}
+- Agent Name: ${identity.agent_name}` : "⚠ No identity found"}
+
+## Contacts
+${contacts ? `${Object.keys(contacts.contacts || {}).length} contact(s)` : "⚠ No contacts file found"}
+
+## Files Included
+
+${manifest.map(item => `- ${item}`).join('\n')}
+
+## Privacy Note
+This export contains:
+- Your agent identity and contact list
+- Conversation logs (if any)
+- OpenClaw configuration (plugin settings only, no API keys)
+- Gateway logs (filtered for AgentLink activity)
+
+**No API keys or sensitive credentials are included.**
+
+## Sharing This Export
+1. Review the contents to ensure you're comfortable sharing
+2. Share the .tar.gz file via email or file transfer
+3. Include a description of the issue you're experiencing
+
+## Support
+- GitHub Issues: https://github.com/agentlink-dev/agentlink/issues
+- Email: hello@agent.lk
+`;
+
+  fs.writeFileSync(path.join(exportDir, "README.md"), readme);
+
+  // 6. Create tarball
+  spinner.text = "Creating archive...";
+  try {
+    execSync(`tar -czf "${exportPath}" -C "${path.dirname(exportDir)}" "${path.basename(exportDir)}"`, {
+      stdio: "pipe",
+    });
+  } catch (err) {
+    spinner.fail("Failed to create tarball");
+    console.error(pc.red(`\n  Error: ${err.message}\n`));
+    process.exit(1);
+  }
+
+  // Clean up temp directory
+  fs.rmSync(exportDir, { recursive: true });
+
+  spinner.succeed("Debug export created");
+
+  // Show summary
+  console.log("");
+  console.log(pc.bold("  Export Summary:"));
+  console.log(pc.dim(`  Location: ${exportPath}`));
+  const sizeMB = (fs.statSync(exportPath).size / 1024).toFixed(1);
+  console.log(pc.dim(`  Size: ${sizeMB} KB`));
+  console.log("");
+
+  if (identity) {
+    console.log(pc.dim(`  Agent: ${identity.agent_id} (${identity.human_name})`));
+  }
+  if (contacts) {
+    const contactCount = Object.keys(contacts.contacts || {}).length;
+    console.log(pc.dim(`  Contacts: ${contactCount}`));
+  }
+
+  console.log("");
+  console.log(pc.green("  ✓ Debug export ready to share"));
+  console.log(pc.dim("  Review README.md inside the archive for details.\n"));
 }
 
 // --- Main ---
@@ -391,16 +796,27 @@ if (command === "setup") {
   const agentNameArg = agentNameIdx >= 0 ? args[agentNameIdx + 1] : undefined;
 
   setup(joinCode, humanNameArg, agentNameArg);
+} else if (command === "reset") {
+  reset();
 } else if (command === "uninstall") {
   uninstall();
+} else if (command === "debug") {
+  await exportDebugLogs();
 } else {
   console.log("\n" + pc.bold("  AgentLink CLI") + "\n");
-  console.log("  Usage:");
-  console.log("    " + pc.cyan("npx @agentlinkdev/agentlink setup") + "                              Install + generate identity");
-  console.log("    " + pc.cyan("npx @agentlinkdev/agentlink setup --join CODE") + "                Install + join via invite");
-  console.log("    " + pc.cyan("npx @agentlinkdev/agentlink setup --human-name NAME") + "          Specify human name");
-  console.log("    " + pc.cyan("npx @agentlinkdev/agentlink setup --agent-name NAME") + "          Specify agent name");
-  console.log("    " + pc.cyan("npx @agentlinkdev/agentlink uninstall") + "                        Remove plugin\n");
-  console.log("  Options can be combined:");
-  console.log("    " + pc.cyan("npx @agentlinkdev/agentlink setup --join CODE --human-name \"Rupul\" --agent-name \"Arya\"") + "\n");
+  console.log("  Commands:");
+  console.log("    " + pc.cyan("agentlink setup [--join CODE] [--human-name NAME] [--agent-name NAME]"));
+  console.log("      " + pc.dim("Set up AgentLink and optionally join with an invite code\n"));
+  console.log("    " + pc.cyan("agentlink reset"));
+  console.log("      " + pc.dim("Clear AgentLink data (keeps plugin installed)\n"));
+  console.log("    " + pc.cyan("agentlink uninstall"));
+  console.log("      " + pc.dim("Completely remove AgentLink\n"));
+  console.log("    " + pc.cyan("agentlink debug"));
+  console.log("      " + pc.dim("Export diagnostic logs for troubleshooting\n"));
+  console.log("  Examples:");
+  console.log("    " + pc.cyan("agentlink setup"));
+  console.log("    " + pc.cyan("agentlink setup --join ABC123 --human-name \"Alice\" --agent-name \"Agent A\""));
+  console.log("    " + pc.cyan("agentlink reset"));
+  console.log("    " + pc.cyan("agentlink uninstall"));
+  console.log("    " + pc.cyan("agentlink debug") + "\n");
 }
