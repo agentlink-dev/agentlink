@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Increase keepAlive to 120 seconds for better connection stability
 - Add disconnect reason logging for debugging
 
-## [0.2.4] - 2026-03-12
+## [0.2.4] - 2026-03-12 (Stable Release)
 
 ### Fixed
 - **Install UX:** Improved invite message with security context to reduce LLM agent questioning from 4 rounds to ≤1
