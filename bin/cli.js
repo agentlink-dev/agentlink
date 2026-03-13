@@ -634,6 +634,670 @@ async function generateInvite(recipientName) {
   console.log(pc.bold(`  Invite code: ${pc.cyan(code)}`), pc.dim(`(expires ${new Date(expires).toLocaleDateString()})\n`));
 }
 
+async function doctor() {
+  // Parse options
+  const args = process.argv.slice(2);
+  const format = args.includes("--format") ? args[args.indexOf("--format") + 1] : "human";
+  const fix = args.includes("--fix") || args.includes("--repair");
+  const deep = args.includes("--deep");
+  const nonInteractive = args.includes("--non-interactive");
+  const checkOrphanedConfig = args.includes("--orphaned-config");
+  const checkMqtt = args.includes("--check-mqtt") || deep;
+  const checkContacts = args.includes("--check-contacts") || deep;
+
+  // Result structure
+  const result = {
+    status: "pass", // pass, warn, critical
+    exitCode: 0,
+    checks: {},
+    repairs: [],
+  };
+
+  // Helper to set status
+  const updateStatus = (severity) => {
+    if (severity === "critical" && result.exitCode < 2) {
+      result.status = "critical";
+      result.exitCode = 2;
+    } else if (severity === "warn" && result.exitCode < 1) {
+      result.status = "warn";
+      result.exitCode = 1;
+    }
+  };
+
+  // --- Environment Info ---
+  const envCheck = { status: "pass", data: {} };
+  try {
+    envCheck.data.os = `${os.platform()} ${os.arch()}`;
+    envCheck.data.osVersion = os.release();
+    envCheck.data.nodeVersion = process.version;
+
+    try {
+      const ocVersion = execSync("openclaw --version", { encoding: "utf-8", stdio: "pipe" }).trim();
+      envCheck.data.openclawVersion = ocVersion;
+    } catch {
+      envCheck.data.openclawVersion = "not found";
+      envCheck.status = "warn";
+      envCheck.issues = ["OpenClaw CLI not found on PATH"];
+      updateStatus("warn");
+    }
+
+    try {
+      const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "../package.json");
+      const pkgJson = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      envCheck.data.agentlinkVersion = pkgJson.version;
+    } catch {
+      envCheck.data.agentlinkVersion = "unknown";
+    }
+  } catch (err) {
+    envCheck.status = "fail";
+    envCheck.issues = [err.message];
+    updateStatus("critical");
+  }
+  result.checks.environment = envCheck;
+
+  // --- Storage Locations ---
+  const storageCheck = { status: "pass", data: {} };
+  try {
+    storageCheck.data.stateDir = OPENCLAW_STATE_DIR;
+    storageCheck.data.dataDir = DATA_DIR;
+
+    const issues = [];
+
+    // Check if directories exist
+    if (!fs.existsSync(OPENCLAW_STATE_DIR)) {
+      issues.push(`OpenClaw state directory not found: ${OPENCLAW_STATE_DIR}`);
+      storageCheck.status = "warn";
+      updateStatus("warn");
+    } else {
+      storageCheck.data.stateDirExists = true;
+      // Check writable
+      try {
+        const testFile = path.join(OPENCLAW_STATE_DIR, `.agentlink-test-${Date.now()}`);
+        fs.writeFileSync(testFile, "test");
+        fs.unlinkSync(testFile);
+        storageCheck.data.stateDirWritable = true;
+      } catch {
+        storageCheck.data.stateDirWritable = false;
+        issues.push("OpenClaw state directory is not writable");
+        storageCheck.status = "fail";
+        updateStatus("critical");
+      }
+    }
+
+    if (!fs.existsSync(DATA_DIR)) {
+      issues.push(`AgentLink data directory not found: ${DATA_DIR}`);
+      storageCheck.status = "warn";
+      updateStatus("warn");
+    } else {
+      storageCheck.data.dataDirExists = true;
+      // Check writable
+      try {
+        const testFile = path.join(DATA_DIR, `.agentlink-test-${Date.now()}`);
+        fs.writeFileSync(testFile, "test");
+        fs.unlinkSync(testFile);
+        storageCheck.data.dataDirWritable = true;
+      } catch {
+        storageCheck.data.dataDirWritable = false;
+        issues.push("AgentLink data directory is not writable");
+        storageCheck.status = "fail";
+        updateStatus("critical");
+      }
+    }
+
+    if (issues.length > 0) {
+      storageCheck.issues = issues;
+    }
+  } catch (err) {
+    storageCheck.status = "fail";
+    storageCheck.issues = [err.message];
+    updateStatus("critical");
+  }
+  result.checks.storage = storageCheck;
+
+  // --- Identity Status ---
+  const identityCheck = { status: "pass", data: {} };
+  try {
+    if (!fs.existsSync(IDENTITY_FILE)) {
+      identityCheck.status = "fail";
+      identityCheck.issues = ["Identity file not found - AgentLink not set up"];
+      updateStatus("critical");
+    } else {
+      try {
+        const identity = JSON.parse(fs.readFileSync(IDENTITY_FILE, "utf-8"));
+        const issues = [];
+
+        if (!identity.agent_id) issues.push("Missing agent_id field");
+        if (!identity.human_name) issues.push("Missing human_name field");
+        if (!identity.agent_name) issues.push("Missing agent_name field");
+
+        if (issues.length > 0) {
+          identityCheck.status = "fail";
+          identityCheck.issues = issues;
+          updateStatus("critical");
+        } else {
+          identityCheck.data = {
+            agentId: identity.agent_id,
+            humanName: identity.human_name,
+            agentName: identity.agent_name,
+          };
+        }
+
+        // Check file permissions
+        try {
+          const stats = fs.statSync(IDENTITY_FILE);
+          identityCheck.data.permissions = (stats.mode & parseInt("777", 8)).toString(8);
+        } catch {}
+      } catch (parseErr) {
+        identityCheck.status = "fail";
+        identityCheck.issues = ["Identity file is not valid JSON"];
+        updateStatus("critical");
+      }
+    }
+  } catch (err) {
+    identityCheck.status = "fail";
+    identityCheck.issues = [err.message];
+    updateStatus("critical");
+  }
+  result.checks.identity = identityCheck;
+
+  // --- Plugin Status ---
+  const pluginCheck = { status: "pass", data: {} };
+  try {
+    // Check if installed
+    try {
+      const listOutput = execSync("openclaw plugins list", { encoding: "utf-8", stdio: "pipe" });
+      pluginCheck.data.installed = listOutput.includes("agentlink");
+
+      if (!pluginCheck.data.installed) {
+        pluginCheck.status = "fail";
+        pluginCheck.issues = ["AgentLink plugin not installed"];
+        updateStatus("critical");
+      }
+    } catch {
+      pluginCheck.data.installed = false;
+      pluginCheck.status = "fail";
+      pluginCheck.issues = ["Cannot check plugin status - openclaw CLI error"];
+      updateStatus("critical");
+    }
+
+    // Check plugin version (from package.json)
+    try {
+      const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "../package.json");
+      const pkgJson = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      pluginCheck.data.version = pkgJson.version;
+    } catch {}
+  } catch (err) {
+    pluginCheck.status = "fail";
+    pluginCheck.issues = [err.message];
+    updateStatus("critical");
+  }
+  result.checks.plugin = pluginCheck;
+
+  // --- Config Validation ---
+  const configCheck = { status: "pass", data: {} };
+  try {
+    if (!fs.existsSync(OC_CONFIG_PATH)) {
+      configCheck.status = "fail";
+      configCheck.issues = ["OpenClaw config file not found"];
+      updateStatus("critical");
+    } else {
+      const config = JSON.parse(fs.readFileSync(OC_CONFIG_PATH, "utf-8"));
+      const issues = [];
+
+      // Check plugins.entries.agentlink
+      if (!config.plugins?.entries?.agentlink) {
+        issues.push("plugins.entries.agentlink not found");
+        configCheck.status = "warn";
+        updateStatus("warn");
+      } else {
+        configCheck.data.pluginEntry = true;
+        if (config.plugins.entries.agentlink.enabled === false) {
+          issues.push("plugins.entries.agentlink.enabled is false");
+          configCheck.status = "warn";
+          updateStatus("warn");
+        }
+      }
+
+      // Check plugins.allow
+      if (!config.plugins?.allow?.includes("agentlink")) {
+        issues.push("'agentlink' not in plugins.allow array");
+        configCheck.status = "warn";
+        updateStatus("warn");
+      } else {
+        configCheck.data.inAllowList = true;
+      }
+
+      // Check tools.alsoAllow
+      if (!config.tools?.alsoAllow?.includes("agentlink")) {
+        issues.push("'agentlink' not in tools.alsoAllow array");
+        configCheck.status = "warn";
+        updateStatus("warn");
+      } else {
+        configCheck.data.inToolsAlsoAllow = true;
+      }
+
+      // Check plugins.installs.agentlink
+      if (!config.plugins?.installs?.agentlink) {
+        issues.push("plugins.installs.agentlink not found");
+        configCheck.status = "warn";
+        updateStatus("warn");
+      } else {
+        configCheck.data.installEntry = true;
+      }
+
+      if (issues.length > 0) {
+        configCheck.issues = issues;
+      }
+    }
+  } catch (err) {
+    configCheck.status = "fail";
+    configCheck.issues = [err.message];
+    updateStatus("critical");
+  }
+  result.checks.config = configCheck;
+
+  // --- Orphaned Config Detection ---
+  if (checkOrphanedConfig) {
+    const orphanedCheck = { status: "pass", data: {} };
+    try {
+      const isInstalled = pluginCheck.data.installed;
+
+      if (!isInstalled && fs.existsSync(OC_CONFIG_PATH)) {
+        const config = JSON.parse(fs.readFileSync(OC_CONFIG_PATH, "utf-8"));
+        const orphanedEntries = [];
+
+        if (config.plugins?.entries?.agentlink) orphanedEntries.push("plugins.entries.agentlink");
+        if (config.plugins?.allow?.includes("agentlink")) orphanedEntries.push("plugins.allow (contains 'agentlink')");
+        if (config.tools?.alsoAllow?.includes("agentlink")) orphanedEntries.push("tools.alsoAllow (contains 'agentlink')");
+        if (config.plugins?.installs?.agentlink) orphanedEntries.push("plugins.installs.agentlink");
+
+        if (orphanedEntries.length > 0) {
+          orphanedCheck.status = "warn";
+          orphanedCheck.issues = [`Orphaned config entries found: ${orphanedEntries.join(", ")}`];
+          orphanedCheck.data.orphanedEntries = orphanedEntries;
+          updateStatus("warn");
+
+          // Auto-repair if --fix
+          if (fix && !nonInteractive) {
+            const repaired = [];
+            if (config.plugins?.entries?.agentlink) {
+              delete config.plugins.entries.agentlink;
+              repaired.push("plugins.entries.agentlink");
+            }
+            if (config.plugins?.allow) {
+              config.plugins.allow = config.plugins.allow.filter(p => p !== "agentlink");
+              repaired.push("plugins.allow");
+            }
+            if (config.tools?.alsoAllow) {
+              config.tools.alsoAllow = config.tools.alsoAllow.filter(t => t !== "agentlink");
+              repaired.push("tools.alsoAllow");
+            }
+            if (config.plugins?.installs?.agentlink) {
+              delete config.plugins.installs.agentlink;
+              repaired.push("plugins.installs.agentlink");
+            }
+
+            fs.writeFileSync(OC_CONFIG_PATH, JSON.stringify(config, null, 2));
+            result.repairs.push(`Removed orphaned config entries: ${repaired.join(", ")}`);
+          }
+        }
+      }
+    } catch (err) {
+      orphanedCheck.status = "fail";
+      orphanedCheck.issues = [err.message];
+      updateStatus("warn");
+    }
+    result.checks.orphanedConfig = orphanedCheck;
+  }
+
+  // --- Contacts List ---
+  if (checkContacts) {
+    const contactsCheck = { status: "pass", data: {} };
+    try {
+      const contactsFile = path.join(DATA_DIR, "contacts.json");
+      if (!fs.existsSync(contactsFile)) {
+        contactsCheck.status = "pass";
+        contactsCheck.data.count = 0;
+      } else {
+        try {
+          const contacts = JSON.parse(fs.readFileSync(contactsFile, "utf-8"));
+          const contactIds = Object.keys(contacts.contacts || {});
+          contactsCheck.data.count = contactIds.length;
+          contactsCheck.data.contactIds = contactIds;
+
+          // Check for invalid entries
+          const invalidEntries = [];
+          Object.entries(contacts.contacts || {}).forEach(([id, contact]) => {
+            if (!contact.agent_id || !contact.human_name) {
+              invalidEntries.push(id);
+            }
+          });
+
+          if (invalidEntries.length > 0) {
+            contactsCheck.status = "warn";
+            contactsCheck.issues = [`Invalid contact entries: ${invalidEntries.join(", ")}`];
+            updateStatus("warn");
+
+            // Auto-repair if --fix
+            if (fix && !nonInteractive) {
+              invalidEntries.forEach(id => {
+                delete contacts.contacts[id];
+              });
+              fs.writeFileSync(contactsFile, JSON.stringify(contacts, null, 2));
+              result.repairs.push(`Removed invalid contact entries: ${invalidEntries.join(", ")}`);
+            }
+          }
+        } catch (parseErr) {
+          contactsCheck.status = "fail";
+          contactsCheck.issues = ["contacts.json is not valid JSON"];
+          updateStatus("warn");
+        }
+      }
+    } catch (err) {
+      contactsCheck.status = "fail";
+      contactsCheck.issues = [err.message];
+      updateStatus("warn");
+    }
+    result.checks.contacts = contactsCheck;
+  }
+
+  // --- MQTT Connection ---
+  if (checkMqtt) {
+    const mqttCheck = { status: "pass", data: {} };
+    try {
+      const brokerUrl = "mqtt://broker.emqx.io:1883";
+      mqttCheck.data.broker = brokerUrl;
+
+      await new Promise((resolve, reject) => {
+        const client = mqtt.connect(brokerUrl, { connectTimeout: 5000 });
+        const timeout = setTimeout(() => {
+          client.end();
+          reject(new Error("Connection timeout"));
+        }, 5000);
+
+        client.on("connect", () => {
+          clearTimeout(timeout);
+          mqttCheck.data.connected = true;
+          client.end();
+          resolve();
+        });
+
+        client.on("error", (err) => {
+          clearTimeout(timeout);
+          client.end();
+          reject(err);
+        });
+      });
+    } catch (err) {
+      mqttCheck.status = "fail";
+      mqttCheck.data.connected = false;
+      mqttCheck.issues = [`MQTT connection failed: ${err.message}`];
+      updateStatus("warn");
+    }
+    result.checks.mqtt = mqttCheck;
+  }
+
+  // --- Gateway Status ---
+  const gatewayCheck = { status: "pass", data: {} };
+  try {
+    const gatewayUrl = "ws://127.0.0.1:18789";
+    gatewayCheck.data.port = 18789;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const ws = new WebSocket(gatewayUrl);
+        const timeout = setTimeout(() => {
+          ws.close();
+          reject(new Error("timeout"));
+        }, 2000);
+
+        ws.on("open", () => {
+          clearTimeout(timeout);
+          gatewayCheck.data.running = true;
+          gatewayCheck.data.responding = true;
+          ws.close();
+          resolve();
+        });
+
+        ws.on("error", () => {
+          clearTimeout(timeout);
+          reject(new Error("connection failed"));
+        });
+      });
+    } catch {
+      gatewayCheck.status = "fail";
+      gatewayCheck.data.running = false;
+      gatewayCheck.data.responding = false;
+      gatewayCheck.issues = ["Gateway not running or not responding"];
+      updateStatus("critical");
+    }
+  } catch (err) {
+    gatewayCheck.status = "fail";
+    gatewayCheck.issues = [err.message];
+    updateStatus("critical");
+  }
+  result.checks.gateway = gatewayCheck;
+
+  // --- File Permissions ---
+  const permissionsCheck = { status: "pass", data: {} };
+  try {
+    const checks = [];
+
+    if (fs.existsSync(IDENTITY_FILE)) {
+      try {
+        const stats = fs.statSync(IDENTITY_FILE);
+        const mode = (stats.mode & parseInt("777", 8)).toString(8);
+        checks.push({ file: "identity.json", mode, readable: true, writable: true });
+
+        // Try to write
+        try {
+          fs.accessSync(IDENTITY_FILE, fs.constants.W_OK);
+        } catch {
+          checks[checks.length - 1].writable = false;
+          permissionsCheck.status = "warn";
+          permissionsCheck.issues = ["identity.json is not writable"];
+          updateStatus("warn");
+
+          // Auto-repair if --fix
+          if (fix && !nonInteractive) {
+            try {
+              fs.chmodSync(IDENTITY_FILE, 0o644);
+              result.repairs.push("Fixed identity.json permissions (644)");
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    const contactsFile = path.join(DATA_DIR, "contacts.json");
+    if (fs.existsSync(contactsFile)) {
+      try {
+        const stats = fs.statSync(contactsFile);
+        const mode = (stats.mode & parseInt("777", 8)).toString(8);
+        checks.push({ file: "contacts.json", mode, readable: true, writable: true });
+
+        // Try to write
+        try {
+          fs.accessSync(contactsFile, fs.constants.W_OK);
+        } catch {
+          checks[checks.length - 1].writable = false;
+          permissionsCheck.status = "warn";
+          permissionsCheck.issues = permissionsCheck.issues || [];
+          permissionsCheck.issues.push("contacts.json is not writable");
+          updateStatus("warn");
+
+          // Auto-repair if --fix
+          if (fix && !nonInteractive) {
+            try {
+              fs.chmodSync(contactsFile, 0o644);
+              result.repairs.push("Fixed contacts.json permissions (644)");
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    permissionsCheck.data.checks = checks;
+  } catch (err) {
+    permissionsCheck.status = "fail";
+    permissionsCheck.issues = [err.message];
+    updateStatus("warn");
+  }
+  result.checks.permissions = permissionsCheck;
+
+  // --- Recent Errors ---
+  if (deep) {
+    const errorsCheck = { status: "pass", data: {} };
+    try {
+      const logPath = path.join(OPENCLAW_STATE_DIR, "logs/gateway.log");
+      if (fs.existsSync(logPath)) {
+        try {
+          const lastLines = execSync(`tail -100 "${logPath}"`, { encoding: "utf-8" });
+          const errorLines = lastLines.split("\n").filter(line =>
+            line.toLowerCase().includes("error") && line.toLowerCase().includes("agentlink")
+          );
+
+          if (errorLines.length > 0) {
+            errorsCheck.status = "warn";
+            errorsCheck.data.errorCount = errorLines.length;
+            errorsCheck.data.recentErrors = errorLines.slice(-5); // Last 5 errors
+            errorsCheck.issues = [`Found ${errorLines.length} error(s) in recent gateway logs`];
+            updateStatus("warn");
+          }
+        } catch {}
+      } else {
+        errorsCheck.data.logFileExists = false;
+      }
+    } catch (err) {
+      errorsCheck.status = "fail";
+      errorsCheck.issues = [err.message];
+      updateStatus("warn");
+    }
+    result.checks.recentErrors = errorsCheck;
+  }
+
+  // --- Pending Operations ---
+  const pendingCheck = { status: "pass", data: {} };
+  try {
+    const pendingFile = path.join(DATA_DIR, "pending_join.json");
+    if (fs.existsSync(pendingFile)) {
+      try {
+        const pending = JSON.parse(fs.readFileSync(pendingFile, "utf-8"));
+        pendingCheck.data.pendingInvite = pending.code || "unknown";
+
+        // Check if stale (>7 days)
+        const stats = fs.statSync(pendingFile);
+        const age = Date.now() - stats.mtimeMs;
+        const daysOld = age / (1000 * 60 * 60 * 24);
+
+        if (daysOld > 7) {
+          pendingCheck.status = "warn";
+          pendingCheck.issues = [`Stale pending_join.json (${Math.floor(daysOld)} days old)`];
+          updateStatus("warn");
+
+          // Auto-repair if --fix
+          if (fix && !nonInteractive) {
+            fs.unlinkSync(pendingFile);
+            result.repairs.push("Deleted stale pending_join.json");
+          }
+        }
+      } catch (parseErr) {
+        pendingCheck.status = "warn";
+        pendingCheck.issues = ["pending_join.json is not valid JSON"];
+        updateStatus("warn");
+      }
+    }
+  } catch (err) {
+    pendingCheck.status = "fail";
+    pendingCheck.issues = [err.message];
+    updateStatus("warn");
+  }
+  result.checks.pending = pendingCheck;
+
+  // --- Output ---
+  if (format === "json") {
+    console.log(JSON.stringify(result, null, 2));
+  } else if (format === "md") {
+    console.log("# AgentLink Diagnostics Report\n");
+
+    for (const [checkName, check] of Object.entries(result.checks)) {
+      const icon = check.status === "pass" ? "✅" : check.status === "warn" ? "⚠️" : "❌";
+      console.log(`## ${icon} ${checkName.charAt(0).toUpperCase() + checkName.slice(1)}\n`);
+
+      if (check.data && Object.keys(check.data).length > 0) {
+        for (const [key, value] of Object.entries(check.data)) {
+          if (typeof value === "object") {
+            console.log(`- **${key}**: ${JSON.stringify(value)}`);
+          } else {
+            console.log(`- **${key}**: ${value}`);
+          }
+        }
+      }
+
+      if (check.issues) {
+        console.log("\n**Issues:**");
+        check.issues.forEach(issue => console.log(`- ${issue}`));
+      }
+
+      console.log("");
+    }
+
+    if (result.repairs.length > 0) {
+      console.log("## 🔧 Repairs Applied\n");
+      result.repairs.forEach(repair => console.log(`- ${repair}`));
+      console.log("");
+    }
+
+    console.log(`\n**Exit Code:** ${result.exitCode} (${result.status})\n`);
+  } else {
+    // Human-readable format
+    console.log("\n" + pc.bold("AgentLink Diagnostics Report") + "\n");
+    console.log("=".repeat(60) + "\n");
+
+    for (const [checkName, check] of Object.entries(result.checks)) {
+      const icon = check.status === "pass" ? pc.green("✅") : check.status === "warn" ? pc.yellow("⚠️") : pc.red("❌");
+      console.log(icon + " " + pc.bold(checkName.charAt(0).toUpperCase() + checkName.slice(1)));
+
+      if (check.data && Object.keys(check.data).length > 0) {
+        for (const [key, value] of Object.entries(check.data)) {
+          if (key === "checks" && Array.isArray(value)) {
+            // Special handling for permissions checks
+            value.forEach(fileCheck => {
+              const status = fileCheck.writable ? pc.green("✓") : pc.red("✗");
+              console.log(`   ${status} ${fileCheck.file}: ${fileCheck.mode} (${fileCheck.writable ? "writable" : "read-only"})`);
+            });
+          } else if (typeof value === "object" && !Array.isArray(value)) {
+            console.log(`   ${key}: ${JSON.stringify(value)}`);
+          } else if (Array.isArray(value)) {
+            console.log(`   ${key}: ${value.join(", ")}`);
+          } else {
+            console.log(`   ${key}: ${value}`);
+          }
+        }
+      }
+
+      if (check.issues) {
+        check.issues.forEach(issue => {
+          console.log(pc.dim(`   Issue: ${issue}`));
+        });
+      }
+
+      console.log("");
+    }
+
+    if (result.repairs.length > 0) {
+      console.log(pc.bold(pc.green("🔧 Repairs Applied:")) + "\n");
+      result.repairs.forEach(repair => console.log(pc.green(`   ✓ ${repair}`)));
+      console.log("");
+    }
+
+    console.log(pc.dim(`Exit Code: ${result.exitCode} (${result.status})`));
+    console.log("");
+  }
+
+  process.exit(result.exitCode);
+}
+
 async function exportDebugLogs() {
   console.log("\n" + pc.bold(pc.blue("  📦 AgentLink Debug Export")) + "\n");
 
@@ -891,6 +1555,8 @@ if (command === "setup") {
   reset();
 } else if (command === "uninstall") {
   uninstall();
+} else if (command === "doctor") {
+  await doctor();
 } else if (command === "debug") {
   await exportDebugLogs();
 } else {
@@ -900,6 +1566,9 @@ if (command === "setup") {
   console.log("      " + pc.dim("Set up AgentLink and optionally join with an invite code\n"));
   console.log("    " + pc.cyan("agentlink invite [--recipient-name NAME]"));
   console.log("      " + pc.dim("Generate an invite code to share with someone\n"));
+  console.log("    " + pc.cyan("agentlink doctor [options]"));
+  console.log("      " + pc.dim("Comprehensive health check and diagnostics"));
+  console.log("      " + pc.dim("Options: --format json|md, --fix, --deep, --check-mqtt, --orphaned-config\n"));
   console.log("    " + pc.cyan("agentlink reset"));
   console.log("      " + pc.dim("Clear AgentLink data (keeps plugin installed)\n"));
   console.log("    " + pc.cyan("agentlink uninstall"));
@@ -910,6 +1579,9 @@ if (command === "setup") {
   console.log("    " + pc.cyan("agentlink setup"));
   console.log("    " + pc.cyan("agentlink setup --join ABC123 --human-name \"Alice\" --agent-name \"Agent A\""));
   console.log("    " + pc.cyan("agentlink invite --recipient-name \"Bob\""));
+  console.log("    " + pc.cyan("agentlink doctor"));
+  console.log("    " + pc.cyan("agentlink doctor --format json"));
+  console.log("    " + pc.cyan("agentlink doctor --fix --deep"));
   console.log("    " + pc.cyan("agentlink reset"));
   console.log("    " + pc.cyan("agentlink uninstall"));
   console.log("    " + pc.cyan("agentlink debug") + "\n");
