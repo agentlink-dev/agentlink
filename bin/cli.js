@@ -576,6 +576,8 @@ function uninstall(options = {}) {
       dataRemoved: false,
       pluginRemoved: false,
       configCleaned: false,
+      pluginDirRemoved: false,
+      loadPathsCleaned: false,
       orphanedEntriesCleaned: [],
     };
 
@@ -589,6 +591,21 @@ function uninstall(options = {}) {
       } catch (err) {
         console.log(pc.yellow("  ⚠ Plugin removal failed - will clean config manually"));
         console.log(pc.dim(`  Error: ${err.message}`));
+      }
+    }
+
+    // Manually remove plugin directory (Bug 4 fix)
+    // openclaw plugins uninstall may not delete the directory, especially with locks/mounts
+    const pluginDir = path.join(OPENCLAW_STATE_DIR, "extensions", "agentlink");
+    if (fs.existsSync(pluginDir)) {
+      console.log(pc.dim("  Removing plugin directory..."));
+      try {
+        fs.rmSync(pluginDir, { recursive: true, force: true });
+        console.log(pc.green("  ✓ Plugin directory removed"));
+        cleanupResults.pluginDirRemoved = true;
+      } catch (err) {
+        console.log(pc.yellow(`  ⚠ Plugin directory removal failed: ${err.message}`));
+        console.log(pc.dim(`  You may need to manually delete: ${pluginDir}`));
       }
     }
 
@@ -627,6 +644,28 @@ function uninstall(options = {}) {
           delete config.plugins.installs.agentlink;
           cleanupResults.orphanedEntriesCleaned.push("plugins.installs.agentlink");
           modified = true;
+        }
+
+        // Remove agentlink paths from plugins.load.paths (Bug 5 fix)
+        if (config.plugins?.load?.paths && Array.isArray(config.plugins.load.paths)) {
+          const originalPaths = config.plugins.load.paths;
+          const filteredPaths = originalPaths.filter(p => {
+            // Remove any path containing "agentlink" (handles /agentlink, /path/to/agentlink, etc.)
+            return !p.includes("agentlink");
+          });
+          if (filteredPaths.length !== originalPaths.length) {
+            config.plugins.load.paths = filteredPaths;
+            cleanupResults.orphanedEntriesCleaned.push("plugins.load.paths");
+            cleanupResults.loadPathsCleaned = true;
+            modified = true;
+            // Remove empty load object if paths is now empty
+            if (filteredPaths.length === 0) {
+              delete config.plugins.load.paths;
+              if (config.plugins.load && Object.keys(config.plugins.load).length === 0) {
+                delete config.plugins.load;
+              }
+            }
+          }
         }
 
         // Write back if modified
@@ -682,6 +721,12 @@ function uninstall(options = {}) {
     }
     if (cleanupResults.pluginRemoved) {
       console.log(pc.dim("  ✓ Plugin removed from OpenClaw"));
+    }
+    if (cleanupResults.pluginDirRemoved) {
+      console.log(pc.dim("  ✓ Plugin directory removed"));
+    }
+    if (cleanupResults.loadPathsCleaned) {
+      console.log(pc.dim("  ✓ Plugin load paths cleaned"));
     }
     if (cleanupResults.configCleaned) {
       console.log(pc.dim("  ✓ Config entries cleaned:"));
