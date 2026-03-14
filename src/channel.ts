@@ -237,47 +237,35 @@ export async function relayToMainSession(
     : senderAgentId;
 
   try {
-    // Use origin context if available (routes back to originating session, e.g., Slack)
-    // Otherwise fall back to webchat:main
-    let agentId = config.agentId;
-    let sessionKey = "main";
-    let targetChannel = "webchat";
+    // When relaying, we want the MAIN session where the human is, NOT a per-sender session.
+    // Call resolveAgentRoute WITHOUT peer to get the default channel session.
+    const targetChannel = originCtx?.channel ?? "webchat";
+    const route = channelApi.routing.resolveAgentRoute({
+      cfg: ocConfig,
+      channel: targetChannel,
+      accountId: originCtx?.agentId ?? config.agentId,
+      // NO peer parameter — this gets us the main/default session, not a per-agent session
+    });
 
-    if (originCtx) {
-      // Route back to the session where the human initiated the A2A conversation
-      targetChannel = originCtx.channel;
-      sessionKey = originCtx.sessionKey;
-      agentId = originCtx.agentId;
-      logger.info(`[AgentLink] Relay targeting origin session: ${targetChannel}:${sessionKey}`);
-    } else {
-      // No origin context — fall back to webchat:main
-      try {
-        const route = channelApi.routing.resolveAgentRoute({
-          cfg: ocConfig,
-          channel: "webchat",
-          accountId: config.agentId,
-        });
-        agentId = route.agentId;
-        if (route.sessionKey) sessionKey = route.sessionKey;
-      } catch {
-        // Use defaults
-      }
-      logger.info(`[AgentLink] Relay targeting fallback session: ${targetChannel}:${sessionKey}`);
-    }
+    const agentId = route.agentId;
+    const sessionKey = originCtx?.sessionKey ?? route.sessionKey;
 
-    // Target the user's actual session (origin or fallback)
+    logger.info(`[AgentLink] Relay targeting session: ${targetChannel}:${sessionKey}`);
+
+    // Build context with matching identifiers (no unique per-sender ID)
+    // This ensures the relay routes to the main session, not a new per-agent session
     const ctx = channelApi.reply.finalizeInboundContext({
       Body: relayText,
       BodyForAgent: relayText,
       SessionKey: sessionKey,
-      From: `agentlink:relay:${senderAgentId}`,
+      From: targetChannel, // Match the channel, not the sender agent
       To: config.agentId,
       Provider: targetChannel,
       Surface: targetChannel,
       OriginatingChannel: targetChannel,
       OriginatingTo: config.agentId,
-      SenderName: senderLabel,
-      SenderId: `agentlink:${senderAgentId}`,
+      SenderName: senderLabel, // Keep for display
+      SenderId: targetChannel, // Match SessionKey origin, not sender
       ChatType: "direct",
       CommandAuthorized: true,
       Timestamp: Date.now(),
