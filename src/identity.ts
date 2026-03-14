@@ -30,13 +30,24 @@ export function scanCapabilities(ocConfigDir?: string): string[] {
     const openclawRaw = fs.readFileSync(openclawJsonPath, "utf-8");
     const openclawData = JSON.parse(openclawRaw);
 
-    // Extract plugin names from plugins array
+    // Extract plugin names from plugins array (legacy format)
     if (Array.isArray(openclawData.plugins)) {
       for (const plugin of openclawData.plugins) {
         if (typeof plugin === "string") {
           capabilities.push(`plugin:${plugin}`);
         } else if (plugin && typeof plugin === "object" && "name" in plugin && typeof plugin.name === "string") {
           capabilities.push(`plugin:${plugin.name}`);
+        }
+      }
+    }
+
+    // Extract plugin names from plugins.entries (current format)
+    if (openclawData.plugins?.entries && typeof openclawData.plugins.entries === "object") {
+      for (const pluginName of Object.keys(openclawData.plugins.entries)) {
+        const entry = openclawData.plugins.entries[pluginName];
+        // Only include enabled plugins
+        if (entry && (entry.enabled === undefined || entry.enabled === true)) {
+          capabilities.push(`plugin:${pluginName}`);
         }
       }
     }
