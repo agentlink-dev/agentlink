@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-03-14
+
+### Fixed
+- **Critical:** Relay routing now injects into origin session (Slack/WhatsApp) instead of A2A session
+- Agent-to-agent conversation summaries now deliver synthesized responses to humans, not raw instruction prompts
+- `dispatchToSession()` now uses `originCtx.channel` for correct session targeting
+- Extended `OriginContext` interface with `to` and `accountId` fields for proper channel delivery
+
 ## [0.2.6] - 2026-03-13
 
 ### Added
