@@ -64,6 +64,28 @@ function box(lines) {
   console.log(`╰${border}╯\n`);
 }
 
+/** Fast MQTT close - force destroy to prevent event loop hanging */
+async function closeMqtt(mqttClient) {
+  try {
+    // Force destroy to immediately close socket and clear timers
+    mqttClient.destroy();
+  } catch (err) {
+    // Ignore errors during close
+  }
+}
+
+
+/**
+ * Disconnect MQTT client with timeout to prevent hanging.
+ * Forces close after 1 second if graceful close doesn't complete.
+ */
+async function disconnectMqtt(client, timeoutMs = 1000) {
+  return Promise.race([
+    new Promise((resolve) => client.end(false, {}, () => resolve())),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs))
+  ]);
+}
+
 function detectIdentity() {
   // 1. Check existing identity.json
   if (fs.existsSync(IDENTITY_FILE)) {
@@ -1943,17 +1965,18 @@ async function searchEmail(email, timeoutMs) {
       console.log(pc.yellow("\n  ✗ Agent not found"));
       console.log(pc.dim(`  The email ${email} is not published for discovery.`));
       console.log(pc.dim(`\n  They may need to run: agentlink publish ${email}\n`));
-      await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+      await closeMqtt(mqttClient);
       process.exit(1);  // Exit with error code when not found
     }
   } catch (err) {
     spinner2.fail("Search failed");
     console.error(pc.red(`  Error: ${err.message}\n`));
-    await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+    await closeMqtt(mqttClient);
     process.exit(1);
   }
 
-  await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+  await closeMqtt(mqttClient);
+  process.exit(0);
 }
 
 /**
@@ -2010,7 +2033,7 @@ async function connectToAgent(email, nameFlag, displayNameFlag) {
       console.log(pc.yellow("\n  ✗ Agent not found"));
       console.log(pc.dim(`  The email ${email} is not published for discovery.`));
       console.log(pc.dim(`\n  They may need to run: agentlink publish ${email}\n`));
-      await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+      await closeMqtt(mqttClient);
       process.exit(1);
     }
 
@@ -2025,11 +2048,17 @@ async function connectToAgent(email, nameFlag, displayNameFlag) {
 
       // Subscribe and wait for retained message
       agentProfile = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => resolve(null), 3000);
+        const timeout = setTimeout(() => {
+          mqttClient.removeListener("message", handler);
+          mqttClient.unsubscribe(statusTopic);
+          resolve(null);
+        }, 3000);
 
         const handler = (topic, payload) => {
           if (topic === statusTopic) {
             clearTimeout(timeout);
+            mqttClient.removeListener("message", handler);
+            mqttClient.unsubscribe(statusTopic);
             try {
               const data = JSON.parse(payload.toString("utf-8"));
               resolve(data);
@@ -2041,7 +2070,11 @@ async function connectToAgent(email, nameFlag, displayNameFlag) {
 
         mqttClient.on("message", handler);
         mqttClient.subscribe(statusTopic, (err) => {
-          if (err) reject(err);
+          if (err) {
+            clearTimeout(timeout);
+            mqttClient.removeListener("message", handler);
+            reject(err);
+          }
         });
       });
 
@@ -2063,7 +2096,7 @@ async function connectToAgent(email, nameFlag, displayNameFlag) {
       console.log(pc.yellow("\n  ⚠ Already connected to this agent"));
       console.log(pc.dim(`  Saved as: ${existing.name}`));
       console.log(pc.dim(`  Agent ID: ${result.agentId}\n`));
-      await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+      await closeMqtt(mqttClient);
       return;
     }
 
@@ -2104,11 +2137,12 @@ async function connectToAgent(email, nameFlag, displayNameFlag) {
     console.log(pc.dim(`\n  You can now message via OpenClaw:`));
     console.log(pc.cyan(`  "Send a message to ${contactName}"\n`));
 
-    await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+    await closeMqtt(mqttClient);
+    process.exit(0);
   } catch (err) {
     spinner.fail("Connection failed");
     console.error(pc.red(`  Error: ${err.message}\n`));
-    await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+    await closeMqtt(mqttClient);
     process.exit(1);
   }
 }
@@ -2167,11 +2201,11 @@ async function unpublishEmail(email) {
   } catch (err) {
     spinner2.fail("Failed to unpublish");
     console.error(pc.red(`  Error: ${err.message}\n`));
-    await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+    await closeMqtt(mqttClient);
     process.exit(1);
   }
 
-  await new Promise((resolve) => mqttClient.end(false, {}, () => resolve()));
+  await closeMqtt(mqttClient);
 }
 
 // --- Main ---
