@@ -84,8 +84,16 @@ export function createMessageTool(
     if (contactEntries.length > 0) {
       const contactList = contactEntries
         .map(([name, entry]) => {
-          const human = entry.human_name ? ` (${entry.human_name}'s agent)` : "";
-          return `  - "${name}"${human}`;
+          // Format: "name" (AgentName for HumanName) or "name" (HumanName's agent)
+          let suffix = "";
+          if (entry.agent_name && entry.human_name) {
+            suffix = ` (${entry.agent_name} for ${entry.human_name})`;
+          } else if (entry.agent_name) {
+            suffix = ` (agent: ${entry.agent_name})`;
+          } else if (entry.human_name) {
+            suffix = ` (${entry.human_name}'s agent)`;
+          }
+          return `  - "${name}"${suffix}`;
         })
         .join("\n");
       description += `\n\nYour contacts:\n${contactList}`;

@@ -58,6 +58,7 @@ function resolveConfig(raw: Record<string, unknown>): AgentLinkConfig {
     brokerPassword: raw.brokerPassword as string | undefined,
     agentId: identity.agent_id,
     humanName: identity.human_name,
+    agentName: identity.agent_name,
     dataDir,
     capabilities: identity.capabilities,
   };

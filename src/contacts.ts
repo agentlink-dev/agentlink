@@ -5,6 +5,7 @@ import os from "node:os";
 export interface ContactEntry {
   agent_id: string;
   human_name?: string;
+  agent_name?: string; // Agent's self-identified name (e.g., "Brienne")
   capabilities?: string[];
   added: string;
 }
@@ -15,7 +16,7 @@ export interface ContactsStore {
   /** Get the full contact entry by name. */
   get(name: string): ContactEntry | null;
   /** Add or update a contact. */
-  add(name: string, agentId: string, humanName?: string, capabilities?: string[]): void;
+  add(name: string, agentId: string, humanName?: string, capabilities?: string[], agentName?: string): void;
   /** Remove a contact by name. */
   remove(name: string): boolean;
   /** Check if a name exists in contacts. */
@@ -72,11 +73,12 @@ export function createContacts(dataDir: string = DEFAULT_DATA_DIR): ContactsStor
       return null;
     },
 
-    add(name, agentId, humanName, capabilities) {
+    add(name, agentId, humanName, capabilities, agentName) {
       const contacts = load();
       contacts[name.toLowerCase()] = {
         agent_id: agentId,
         human_name: humanName,
+        agent_name: agentName,
         capabilities,
         added: new Date().toISOString().split("T")[0],
       };

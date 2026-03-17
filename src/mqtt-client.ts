@@ -29,7 +29,7 @@ export function createMqttClient(config: AgentLinkConfig, logger: Logger): MqttC
 
   // LWT (Last Will and Testament): published by broker when we disconnect unexpectedly
   const lwtPayload = JSON.stringify(
-    createStatusPayload(config.agentId, config.humanName, false)
+    createStatusPayload(config.agentId, config.humanName, false, config.agentName)
   );
 
   return {
@@ -44,7 +44,9 @@ export function createMqttClient(config: AgentLinkConfig, logger: Logger): MqttC
         connectTimeout: 10_000,
         will: {
           topic: TOPICS.status(config.agentId),
-          payload: Buffer.from(lwtPayload),
+          payload: Buffer.from(
+            JSON.stringify(createStatusPayload(config.agentId, config.humanName, false, config.agentName))
+          ),
           qos: 1,
           retain: true,
         },
@@ -64,7 +66,7 @@ export function createMqttClient(config: AgentLinkConfig, logger: Logger): MqttC
 
           // Publish online status (retained)
           const statusPayload = JSON.stringify(
-            createStatusPayload(config.agentId, config.humanName, true)
+            createStatusPayload(config.agentId, config.humanName, true, config.agentName)
           );
           client!.publish(TOPICS.status(config.agentId), statusPayload, {
             qos: 1,
@@ -107,7 +109,7 @@ export function createMqttClient(config: AgentLinkConfig, logger: Logger): MqttC
       if (client) {
         // Publish offline status before disconnecting
         const offlinePayload = JSON.stringify(
-          createStatusPayload(config.agentId, config.humanName, false)
+          createStatusPayload(config.agentId, config.humanName, false, config.agentName)
         );
         await new Promise<void>((resolve) => {
           client!.publish(

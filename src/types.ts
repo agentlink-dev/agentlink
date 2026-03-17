@@ -126,6 +126,7 @@ export function parseEnvelope(payload: string): MessageEnvelope | null {
 export interface AgentStatus {
   agent_id: string;
   human_name: string;
+  agent_name?: string; // Optional: agent's self-identified name (e.g., "Brienne")
   online: boolean;
   timestamp: number;
 }
@@ -134,8 +135,15 @@ export function createStatusPayload(
   agentId: string,
   humanName: string,
   online: boolean,
+  agentName?: string,
 ): AgentStatus {
-  return { agent_id: agentId, human_name: humanName, online, timestamp: Date.now() };
+  return {
+    agent_id: agentId,
+    human_name: humanName,
+    agent_name: agentName,
+    online,
+    timestamp: Date.now()
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +203,7 @@ export interface AgentLinkConfig {
   brokerPassword?: string;
   agentId: string;
   humanName: string;
+  agentName?: string; // Optional: agent's self-identified name (e.g., "Arya", "Brienne")
   dataDir: string;
   landingPageUrl?: string; // Base URL for invite landing page (default: https://website-agentlink.vercel.app)
   capabilities?: string[]; // Agent's capabilities (plugins, skills, tools)

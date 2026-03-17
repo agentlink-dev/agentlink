@@ -1936,8 +1936,8 @@ async function searchEmail(email, timeoutMs) {
       console.log(pc.green("\n  ✓ Agent found"));
       console.log(pc.dim(`  Email: ${email}`));
       console.log(pc.dim(`  Agent ID: ${result.agentId}`));
-      console.log(pc.dim(`\n  To send a message, use the AgentLink plugin in OpenClaw:`));
-      console.log(pc.cyan(`  "Send a message to ${result.agentId}"\n`));
+      console.log(pc.dim(`\n  To connect and add as a contact, run:`));
+      console.log(pc.cyan(`  agentlink connect ${email}\n`));
     } else {
       spinner2.fail("Agent not found");
       console.log(pc.yellow("\n  ✗ Agent not found"));
@@ -2016,6 +2016,44 @@ async function connectToAgent(email, nameFlag, displayNameFlag) {
 
     spinner.succeed("Agent found");
 
+    // Query agent profile from status topic (whois)
+    const spinner2 = ora("Querying agent profile...").start();
+    let agentProfile = null;
+    try {
+      const { TOPICS } = await import("../dist/src/types.js");
+      const statusTopic = TOPICS.status(result.agentId);
+
+      // Subscribe and wait for retained message
+      agentProfile = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => resolve(null), 3000);
+
+        const handler = (topic, payload) => {
+          if (topic === statusTopic) {
+            clearTimeout(timeout);
+            try {
+              const data = JSON.parse(payload.toString("utf-8"));
+              resolve(data);
+            } catch {
+              resolve(null);
+            }
+          }
+        };
+
+        mqttClient.on("message", handler);
+        mqttClient.subscribe(statusTopic, (err) => {
+          if (err) reject(err);
+        });
+      });
+
+      if (agentProfile) {
+        spinner2.succeed("Agent profile retrieved");
+      } else {
+        spinner2.warn("Agent profile not available (offline or not published)");
+      }
+    } catch (err) {
+      spinner2.warn(`Could not retrieve agent profile: ${err.message}`);
+    }
+
     // Load contacts
     const contacts = createContacts(DATA_DIR);
 
@@ -2032,27 +2070,35 @@ async function connectToAgent(email, nameFlag, displayNameFlag) {
     // Determine contact name
     let contactName = nameFlag;
     if (!contactName) {
-      // Suggest name from email
-      const suggestedName = email.split('@')[0].toLowerCase();
+      // Suggest agent_name from profile, or fallback to email
+      const suggestedName = agentProfile?.agent_name?.toLowerCase() || email.split('@')[0].toLowerCase();
       const response = await ask(`  Contact name [${suggestedName}]: `);
       contactName = response || suggestedName;
     }
 
-    // Determine display name
+    // Determine display name (use human_name from profile if available)
     let displayName = displayNameFlag;
     if (!displayName && !displayNameFlag) {
-      const response = await ask(`  Display name (optional): `);
-      displayName = response || null;
+      const suggestedDisplay = agentProfile?.human_name || null;
+      const prompt = suggestedDisplay ? `  Display name [${suggestedDisplay}]: ` : `  Display name (optional): `;
+      const response = await ask(prompt);
+      displayName = response || suggestedDisplay;
     }
 
-    // Add to contacts
-    contacts.add(contactName, result.agentId, displayName, undefined);
+    // Extract agent_name from profile
+    const agentName = agentProfile?.agent_name || null;
+
+    // Add to contacts (now with agent_name)
+    contacts.add(contactName, result.agentId, displayName, undefined, agentName);
 
     console.log(pc.green("\n  ✓ Contact saved"));
     console.log(pc.dim(`  Email: ${email}`));
-    console.log(pc.dim(`  Name: ${contactName}`));
+    console.log(pc.dim(`  Contact name: ${contactName}`));
+    if (agentName) {
+      console.log(pc.dim(`  Agent name: ${agentName}`));
+    }
     if (displayName) {
-      console.log(pc.dim(`  Display name: ${displayName}`));
+      console.log(pc.dim(`  Human name: ${displayName}`));
     }
     console.log(pc.dim(`  Agent ID: ${result.agentId}`));
     console.log(pc.dim(`\n  You can now message via OpenClaw:`));
