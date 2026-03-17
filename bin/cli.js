@@ -258,7 +258,7 @@ async function waitForGatewayRestart(maxWaitSeconds = 120) {
   return false;
 }
 
-async function setup(joinCode, humanNameArg, agentNameArg) {
+async function setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, locationArg, jsonOutput) {
   console.log("\n" + pc.bold("  AgentLink Setup") + "\n");
 
   // Step 1: Check for OpenClaw
@@ -286,14 +286,20 @@ async function setup(joinCode, humanNameArg, agentNameArg) {
   } else {
     let humanName;
     let agentName;
+    let email;
+    let phone;
+    let location;
 
     // Check if CLI arguments were provided (non-interactive mode)
-    const isNonInteractive = humanNameArg || agentNameArg || joinCode;
+    const isNonInteractive = humanNameArg || agentNameArg || emailArg || joinCode;
 
     if (isNonInteractive) {
       // Use CLI args, then detected values, then defaults
       humanName = humanNameArg || detected.humanName || os.userInfo().username || "User";
       agentName = agentNameArg || detected.agentName || "Agent";
+      email = emailArg || detected.email;
+      phone = phoneArg || detected.phone;
+      location = locationArg || detected.location;
 
       console.log(pc.dim(`  Auto-configuring...`));
       if (humanNameArg) {
@@ -310,6 +316,19 @@ async function setup(joinCode, humanNameArg, agentNameArg) {
         console.log(pc.dim(`  Agent name: ${agentName} (from ${detected.agentNameSource})`));
       } else {
         console.log(pc.dim(`  Agent name: ${agentName} (using default)`));
+      }
+      if (emailArg) {
+        console.log(pc.dim(`  Email: ${email} (from --email)`));
+      } else if (detected.email) {
+        console.log(pc.dim(`  Email: ${email} (from identity.json)`));
+      }
+
+      if (phoneArg) {
+        console.log(pc.dim(`  Phone: ${phone} (from --phone)`));
+      }
+
+      if (locationArg) {
+        console.log(pc.dim(`  Location: ${location} (from --location)`));
       }
     } else {
       // Interactive mode - ask for confirmation/input
@@ -341,7 +360,14 @@ async function setup(joinCode, humanNameArg, agentNameArg) {
     }
 
     const agentId = `${slugify(agentName)}-${generateSuffix()}`;
-    identity = { agent_id: agentId, human_name: humanName, agent_name: agentName };
+    identity = {
+      agent_id: agentId,
+      human_name: humanName,
+      agent_name: agentName,
+      email,
+      phone,
+      location
+    };
     fs.writeFileSync(IDENTITY_FILE, JSON.stringify(identity, null, 2) + "\n");
     console.log(pc.green(`  ✓ Agent ID: ${agentId}`));
     console.log(pc.dim(`  ${agentName} for ${humanName}`));
@@ -2221,8 +2247,19 @@ if (command === "setup") {
 
   const agentNameIdx = args.indexOf("--agent-name");
   const agentNameArg = agentNameIdx >= 0 ? args[agentNameIdx + 1] : undefined;
+  const emailIdx = args.indexOf("--email");
+  const emailArg = emailIdx >= 0 ? args[emailIdx + 1] : undefined;
 
-  setup(joinCode, humanNameArg, agentNameArg);
+  const phoneIdx = args.indexOf("--phone");
+  const phoneArg = phoneIdx >= 0 ? args[phoneIdx + 1] : undefined;
+
+  const locationIdx = args.indexOf("--location");
+  const locationArg = locationIdx >= 0 ? args[locationIdx + 1] : undefined;
+
+  const jsonIdx = args.indexOf("--json");
+  const jsonOutput = jsonIdx >= 0;
+
+  setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, locationArg, jsonOutput);
 } else if (command === "invite") {
   const recipientIdx = args.indexOf("--recipient-name");
   const recipientName = recipientIdx >= 0 ? args[recipientIdx + 1] : undefined;
@@ -2283,7 +2320,7 @@ if (command === "setup") {
 } else {
   console.log("\n" + pc.bold("  AgentLink CLI") + "\n");
   console.log("  Commands:");
-  console.log("    " + pc.cyan("agentlink setup [--join CODE] [--human-name NAME] [--agent-name NAME]"));
+  console.log("    " + pc.cyan("agentlink setup [--join CODE] [--human-name NAME] [--agent-name NAME] [--email EMAIL] [--phone PHONE] [--location LOCATION] [--json]"));
   console.log("      " + pc.dim("Set up AgentLink and optionally join with an invite code\n"));
   console.log("    " + pc.cyan("agentlink init [--name NAME]"));
   console.log("      " + pc.dim("Initialize AgentLink identity (generates v2 agent ID)\n"));
