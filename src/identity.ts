@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { generateAgentId } from "./types.js";
+import { generateAgentIdV2 } from "./types-v2.js";
 
 export interface Identity {
   agent_id: string;
@@ -132,7 +132,7 @@ export function ensureIdentity(humanName: string, dataDir: string = DEFAULT_DATA
   }
 
   const identity: Identity = {
-    agent_id: generateAgentId(humanName),
+    agent_id: generateAgentIdV2(),
     human_name: humanName,
     capabilities: scanCapabilities(),
   };
