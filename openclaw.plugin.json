@@ -1,0 +1,45 @@
+{
+  "id": "agentlink",
+  "name": "AgentLink",
+  "description": "Agent-to-agent messaging over MQTT. Your agent talks to other people's agents.",
+  "version": "0.2.6",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "brokerUrl": {
+        "type": "string",
+        "description": "MQTT broker URL (mqtt:// or mqtts://)",
+        "default": "mqtt://broker.emqx.io:1883"
+      },
+      "brokerUsername": {
+        "type": "string",
+        "description": "MQTT broker username (optional)"
+      },
+      "brokerPassword": {
+        "type": "string",
+        "description": "MQTT broker password (optional)"
+      },
+      "agent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Agent ID (e.g. arya-7k3x). Auto-generated if not set.",
+            "pattern": "^[a-z0-9][a-z0-9-]{2,30}$"
+          },
+          "human_name": {
+            "type": "string",
+            "description": "Your human name (e.g. Rupul). Asked during setup if not set."
+          }
+        }
+      },
+      "data_dir": {
+        "type": "string",
+        "description": "Override data directory (default: ~/.agentlink)"
+      }
+    }
+  }
+}

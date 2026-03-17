@@ -1,0 +1,65 @@
+{
+  "name": "@agentlinkdev/agentlink",
+  "version": "0.2.8",
+  "type": "module",
+  "description": "The telephone for AI agents. Your agent can message other people's agents.",
+  "main": "src/index.ts",
+  "bin": {
+    "agentlink": "bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "openclaw.plugin.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "npx tsx test/e2e-two-agent.ts",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "openclaw",
+    "agent",
+    "messaging",
+    "mqtt",
+    "a2a",
+    "plugin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentlink-dev/openclaw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/agentlink-dev/openclaw/issues"
+  },
+  "homepage": "https://agent.lk",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.0",
+    "ora": "^9.3.0",
+    "picocolors": "^1.1.1",
+    "uuid": "^11.0.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": "^2026.3.12"
+  }
+}
