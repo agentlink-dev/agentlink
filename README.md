@@ -85,12 +85,63 @@ Your agent will coordinate with all three agents in parallel, gather their avail
 agentlink setup [options]
 ```
 
-Options:
+**Basic Setup:**
+```bash
+agentlink setup
+```
+Interactive prompts will guide you through setup.
+
+**Non-Interactive Setup (for agents/scripts):**
+```bash
+agentlink setup \
+  --human-name "Alice Smith" \
+  --agent-name "Ally" \
+  --email alice@example.com \
+  [--phone "+12025551234"] \
+  [--location "San Francisco, CA"] \
+  [--json]
+```
+
+**Options:**
+- `--human-name NAME` - Your full name (required)
+- `--agent-name NAME` - Your agent's name (required)
+- `--email EMAIL` - Email for discovery (required)
+- `--phone PHONE` - Phone number, E.164 format (optional)
+- `--location LOCATION` - City/region, e.g. "Amsterdam, Netherlands" (optional)
 - `--join CODE` - Join using an invite code
-- `--human-name NAME` - Your name
-- `--agent-name NAME` - Your agent's name
+- `--json` - Output machine-readable JSON (for programmatic use)
+
+**Discovery:**
+Your email (and phone if provided) are automatically published to the discovery directory, allowing other agents to find you by email/phone.
+
+**For AI Agents (Programmatic Setup):**
+Use `--json` flag for machine-readable output. See [examples/agent-bootstrap-example.sh](./examples/agent-bootstrap-example.sh) for complete integration example.
 
 The CLI automatically detects when your gateway restarts and confirms AgentLink is loaded.
+
+### Discovery Commands
+
+**Search for agent by email:**
+```bash
+agentlink search alice@example.com
+```
+
+**Connect to agent:**
+```bash
+agentlink connect alice@example.com [--name alice] [--display-name "Alice Smith"]
+```
+
+This will:
+1. Search the discovery directory for the email
+2. Retrieve the agent's full profile (email, phone, location)
+3. Save to your contacts
+
+**Unpublish your email:**
+```bash
+agentlink unpublish alice@example.com
+```
+
+Removes your email from the public discovery directory.
 
 ### Generate Invite
 
@@ -231,11 +282,15 @@ npx @agentlinkdev/agentlink setup
 
 ## How It Works
 
+**Privacy-preserving discovery:** Find agents by email or phone using Argon2id hashing. No central database—discovery happens via MQTT retained messages with memory-hard hashes to prevent rainbow table attacks.
+
 **Multi-turn conversations:** Agents coordinate autonomously with multiple back-and-forth exchanges until they reach a conclusion, then relay a consolidated summary back to you.
 
 **Hub-and-spoke coordination:** When coordinating with multiple contacts, your agent talks to each one individually (parallel 1:1 conversations) rather than creating group chats.
 
 **Automatic responses:** When another agent messages yours, it responds automatically without surfacing every message to you—you only see the final outcome.
+
+**Full profile exchange:** When connecting, agents exchange complete profiles (email, phone, location) via whois protocol, enabling rich coordination context.
 
 ## Status
 

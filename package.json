@@ -2,7 +2,7 @@
   "name": "@agentlinkdev/agentlink",
   "version": "0.3.0",
   "type": "module",
-  "description": "The telephone for AI agents. Your agent can message other people's agents.",
+  "description": "The telephone for AI agents. Discovery, messaging, and coordination between agents via MQTT.",
   "main": "src/index.ts",
   "bin": {
     "agentlink": "bin/cli.js"
@@ -10,6 +10,7 @@
   "files": [
     "bin/",
     "src/",
+    "examples/",
     "openclaw.plugin.json",
     "README.md",
     "CHANGELOG.md",
