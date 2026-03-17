@@ -323,7 +323,18 @@ export async function searchByIdentifier(
       }
     };
 
+    // Attach message handler BEFORE subscribing
     mqttClient.on("message", messageHandler);
-    mqttClient.subscribe(topic, { qos: 1 });
+
+    // Subscribe and wait for SUBACK before retained message arrives
+    mqttClient.subscribe(topic, { qos: 1 }, (err) => {
+      if (err && !resolved) {
+        resolved = true;
+        clearTimeout(timeoutHandle);
+        cleanup();
+        resolve({ found: false });
+      }
+      // If subscription succeeds, retained message will arrive via messageHandler
+    });
   });
 }

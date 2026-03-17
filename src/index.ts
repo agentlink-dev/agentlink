@@ -59,6 +59,9 @@ function resolveConfig(raw: Record<string, unknown>): AgentLinkConfig {
     agentId: identity.agent_id,
     humanName: identity.human_name,
     agentName: identity.agent_name,
+    email: identity.email,
+    phone: identity.phone,
+    location: identity.location,
     dataDir,
     capabilities: identity.capabilities,
   };

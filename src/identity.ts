@@ -7,6 +7,9 @@ export interface Identity {
   agent_id: string;
   human_name: string;
   agent_name?: string; // Optional: agent's name (e.g., "Arya")
+  email?: string; // Optional: primary email for discovery
+  phone?: string; // Optional: phone number for discovery
+  location?: string; // Optional: free-form location (e.g., "Amsterdam, Netherlands")
   capabilities?: string[]; // Optional: agent's capabilities (plugins, skills, tools)
 }
 
@@ -94,6 +97,9 @@ export function loadIdentity(dataDir: string = DEFAULT_DATA_DIR): Identity | nul
         agent_id: data.agent_id,
         human_name: data.human_name,
         agent_name: data.agent_name, // Optional field
+        email: data.email, // Optional field
+        phone: data.phone, // Optional field
+        location: data.location, // Optional field
         capabilities: data.capabilities, // Optional field
       };
     }
@@ -139,7 +145,7 @@ export function ensureIdentity(humanName: string, dataDir: string = DEFAULT_DATA
  * Priority: explicit config > identity.json > auto-generate.
  */
 export function resolveIdentity(
-  config: { agentId?: string; humanName?: string; agentName?: string; dataDir?: string },
+  config: { agentId?: string; humanName?: string; agentName?: string; email?: string; phone?: string; location?: string; dataDir?: string },
 ): Identity {
   const dataDir = config.dataDir ?? DEFAULT_DATA_DIR;
 
@@ -149,6 +155,9 @@ export function resolveIdentity(
       agent_id: config.agentId,
       human_name: config.humanName,
       agent_name: config.agentName,
+      email: config.email,
+      phone: config.phone,
+      location: config.location,
       capabilities: scanCapabilities(),
     };
   }
@@ -164,6 +173,9 @@ export function resolveIdentity(
       agent_id: config.agentId ?? existing.agent_id,
       human_name: config.humanName ?? existing.human_name,
       agent_name: config.agentName ?? existing.agent_name,
+      email: config.email ?? existing.email,
+      phone: config.phone ?? existing.phone,
+      location: config.location ?? existing.location,
       capabilities: caps,
     };
   }

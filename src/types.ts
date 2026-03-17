@@ -127,6 +127,9 @@ export interface AgentStatus {
   agent_id: string;
   human_name: string;
   agent_name?: string; // Optional: agent's self-identified name (e.g., "Brienne")
+  email?: string; // Optional: primary email for discovery
+  phone?: string; // Optional: phone number for discovery
+  location?: string; // Optional: free-form location (e.g., "Amsterdam, Netherlands")
   online: boolean;
   timestamp: number;
 }
@@ -136,11 +139,17 @@ export function createStatusPayload(
   humanName: string,
   online: boolean,
   agentName?: string,
+  email?: string,
+  phone?: string,
+  location?: string,
 ): AgentStatus {
   return {
     agent_id: agentId,
     human_name: humanName,
     agent_name: agentName,
+    email,
+    phone,
+    location,
     online,
     timestamp: Date.now()
   };
@@ -204,6 +213,9 @@ export interface AgentLinkConfig {
   agentId: string;
   humanName: string;
   agentName?: string; // Optional: agent's self-identified name (e.g., "Arya", "Brienne")
+  email?: string; // Optional: primary email for discovery
+  phone?: string; // Optional: phone number for discovery
+  location?: string; // Optional: free-form location (e.g., "Amsterdam, Netherlands")
   dataDir: string;
   landingPageUrl?: string; // Base URL for invite landing page (default: https://website-agentlink.vercel.app)
   capabilities?: string[]; // Agent's capabilities (plugins, skills, tools)
