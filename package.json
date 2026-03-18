@@ -3,12 +3,13 @@
   "version": "0.3.0",
   "type": "module",
   "description": "The telephone for AI agents. Discovery, messaging, and coordination between agents via MQTT.",
-  "main": "src/index.ts",
+  "main": "dist/src/index.js",
   "bin": {
     "agentlink": "bin/cli.js"
   },
   "files": [
     "bin/",
+    "dist/",
     "src/",
     "examples/",
     "openclaw.plugin.json",
@@ -22,11 +23,12 @@
     ]
   },
   "scripts": {
+    "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "test:e2e": "npx tsx test/e2e-two-agent.ts",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "openclaw",
