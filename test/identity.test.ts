@@ -57,7 +57,10 @@ describe("ensureIdentity", () => {
   it("creates identity on fresh install", () => {
     const identity = ensureIdentity("Rupul", TEST_DIR);
     expect(identity.human_name).toBe("Rupul");
-    expect(identity.agent_id).toMatch(/^rupul-[a-z0-9]{4}$/);
+    // V2 agent IDs are Base58 encoded, 21-23 characters
+    expect(identity.agent_id).toMatch(/^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{21,23}$/);
+    expect(identity.agent_id.length).toBeGreaterThanOrEqual(21);
+    expect(identity.agent_id.length).toBeLessThanOrEqual(23);
     // Verify persisted
     expect(loadIdentity(TEST_DIR)).toEqual(identity);
   });

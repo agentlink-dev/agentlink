@@ -239,7 +239,7 @@ export async function unpublishDiscoveryRecord(
     mqttClient.publish(
       topic,
       "",
-      { qos: 1, retain: true },
+      { qos: 0, retain: true },
       (err) => {
         if (err) reject(err);
         else resolve();
