@@ -134,8 +134,15 @@ export function extractShortHash(argon2Hash: string): string {
   const parts = argon2Hash.split("$");
   const hashPart = parts[parts.length - 1]; // Last part is the hash
 
+  // Convert to MQTT-safe characters (base64 uses +/= which are MQTT special chars)
+  // Replace: / → - (hyphen), + → _ (underscore), remove =
+  const mqttSafe = hashPart
+    .replace(/\//g, "-")  // Topic separator → hyphen
+    .replace(/\+/g, "_")  // Wildcard char → underscore
+    .replace(/=/g, "");    // Padding → remove
+
   // Return first 32 characters (MQTT-safe)
-  return hashPart.slice(0, 32);
+  return mqttSafe.slice(0, 32);
 }
 
 /**
