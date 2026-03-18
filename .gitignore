@@ -5,3 +5,9 @@ dist/
 *.log
 website-agentlink
 .vscode/
+
+# Test/debug files
+test-*.js
+test-*.sh
+*-test-results.txt
+publish-test-*.txt
