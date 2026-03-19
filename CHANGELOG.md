@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-19
+
+### Added
+- **Unified connect flow:** `agentlink_connect` now handles discovery, online check, and connection in a single tool call. Replaces separate `agentlink_invite` and `agentlink_join` tools.
+- **Proactive notifications:** When someone connects with your agent, you're notified on all your active messaging channels (Slack, WhatsApp, Telegram, Discord). Falls back to webchat if no messaging channels are known.
+- **Channel tracker:** New `src/channel-tracker.ts` records which channels the human uses (via `message_received` hook) to `~/.agentlink/channels.json` for notification routing.
+- **Contacts tool:** New `agentlink_contacts` tool lists all connected agents with name, agent name, human name, agent ID, email, and date added.
+- **Agent names in envelopes:** `from_agent_name` field in MessageEnvelope so contacts are saved by agent name (e.g., "arya") instead of human name.
+
+### Changed
+- **Trust-on-first-use:** No longer injects into the A2A session (which triggered unwanted auto-responses). Now uses `pushNotification` to deliver to the human's known channels.
+- Contact naming uses agent name first, falling back to human name then agent ID.
+
+### Fixed
+- Trust-on-first-use notification no longer triggers A2A auto-response back to the sender.
+
 ## [0.4.0] - 2026-03-19
 
 ### Fixed
