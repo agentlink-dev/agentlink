@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.1-beta.0] - 2026-03-19
+## [0.4.1] - 2026-03-19
 
 ### Changed
 - **Setup UX:** Numbered steps `[1/4]`, descriptive header with time estimate, human-readable agent identity line, cleaner success box using real names
