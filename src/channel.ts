@@ -538,16 +538,17 @@ export function handleIncomingEnvelope(
   channelApi?: ChannelApi,
   ocConfig?: Record<string, unknown>,
   invitations?: InvitationsStore,
+  a2aManager?: A2ASessionManager,
+  runtime?: any,
 ): void {
   if (envelope.type === "contact_exchange") {
     if (envelope.ack) {
-      // This is an acknowledgment — log confirmation and notify human
+      // This is an acknowledgment — log confirmation
       logger.info(`[AgentLink] Connection confirmed with ${envelope.from_name} (${envelope.from})`);
 
       // Update contact with capabilities from ack if available
       const existingContact = contacts.findByAgentId(envelope.from);
       if (existingContact && envelope.capabilities && envelope.capabilities.length > 0) {
-        // Update the existing contact with capabilities
         contacts.add(
           existingContact.name,
           envelope.from,
@@ -557,9 +558,10 @@ export function handleIncomingEnvelope(
         logger.info(`[AgentLink] Updated ${envelope.from} with ${envelope.capabilities.length} capabilities`);
       }
 
-      // Inject notification to main session
-      if (channelApi && ocConfig) {
-        const notificationText = `[AgentLink] Connection confirmed! ${envelope.from_name}'s agent (${envelope.from}) received your contact exchange.`;
+      // Relay notification to the human's origin session (async relay for ack-timeout case)
+      const originCtx = a2aManager?.getOriginContext(envelope.from);
+      if (originCtx && channelApi && ocConfig && runtime) {
+        const notificationText = `${envelope.from_name}'s agent has confirmed your connection. You can now message ${envelope.from_name}.`;
         relayToInitiatingSession(
           notificationText,
           envelope.from,
@@ -568,9 +570,14 @@ export function handleIncomingEnvelope(
           channelApi,
           ocConfig,
           logger,
+          originCtx,
+          runtime,
         ).catch((err) => {
           logger.warn(`[AgentLink] Failed to relay connection confirmation: ${err}`);
         });
+      } else {
+        // No origin context — ack was already handled synchronously in the tool call
+        logger.info(`[AgentLink] Ack from ${envelope.from} — no async relay needed (handled synchronously)`);
       }
       return;
     }
@@ -585,7 +592,6 @@ export function handleIncomingEnvelope(
       // Update any matching sent invites to "accepted" status
       if (invitations) {
         const sent = invitations.getSent();
-        // Find any pending invite (most recent one, as we don't have exact code in envelope)
         const pendingInvite = sent.find(
           inv => inv.status === "pending" && !inv.accepted_by
         );
@@ -595,8 +601,9 @@ export function handleIncomingEnvelope(
         }
       }
 
+      // Trust-on-first-use notification — no block mention (not implemented yet)
       injectToSession(
-        `[AgentLink] ${envelope.from_name}'s agent (${envelope.from}) has connected! They are now in your contacts. You can message them anytime.`,
+        `[AgentLink] ${envelope.from_name}'s agent just connected with you. They're now in your contacts.\nYou can say "message ${envelope.from_name?.toLowerCase() || "them"}" to start a conversation.`,
         envelope.from,
       );
     }
