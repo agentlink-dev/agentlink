@@ -20,6 +20,7 @@ describe("Discovery Performance Benchmarks", () => {
   });
 
   it("10 sequential hashes < 5 seconds", async () => {
+    // hash-wasm Argon2id is ~600-900ms/hash; 10 sequential needs extended timeout
     const agentId = generateAgentIdV2();
     const identifiers = Array.from({ length: 10 }, (_, i) => `user${i}@example.com`);
 
@@ -32,7 +33,7 @@ describe("Discovery Performance Benchmarks", () => {
     console.log(`  10 sequential hashes: ${duration.toFixed(2)}ms`);
     console.log(`  Average per hash: ${(duration / 10).toFixed(2)}ms`);
     expect(duration).toBeLessThan(15000); // ~600–900ms × 10 sequential
-  });
+  }, 20000); // 20s vitest timeout (hash-wasm is slower than native argon2)
 
   it("5 parallel hashes < 2 seconds", async () => {
     const agentId = generateAgentIdV2();
