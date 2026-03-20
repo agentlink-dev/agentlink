@@ -393,74 +393,73 @@ async function setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, l
     }
   }
 
-  // Step 3: Install plugin with proper permission dance
+  // Step 3: Copy plugin files + write config.
+  //
+  // We skip `openclaw plugins install` entirely. That command runs a full npm install
+  // for the plugin's dependencies, which uses ~200MB+ and gets OOM-killed in Docker.
+  // The AgentLink plugin ships as a self-contained bundle (dist/bundle.js) — it has
+  // no runtime dependencies to install. We just copy the three files OpenClaw needs
+  // from the current package (already on disk via npx) into extensions/.
   const spinner2 = ora("Installing AgentLink plugin...").start();
 
   try {
-    // Read config
+    // Locate the current package root (bin/cli.js → one level up)
+    const packageRoot = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname), ".."
+    );
+
+    // Prepare plugin directory in OpenClaw extensions/
+    const extensionsDir = path.join(OPENCLAW_STATE_DIR, "extensions");
+    const pluginDir = path.join(extensionsDir, "agentlink");
+    const pluginDistDir = path.join(pluginDir, "dist");
+
+    fs.mkdirSync(pluginDistDir, { recursive: true });
+
+    // Copy only the files OpenClaw needs to load the plugin:
+    //   openclaw.plugin.json  — plugin manifest (entry point, name, version)
+    //   package.json          — package metadata
+    //   dist/bundle.js        — self-contained bundle (all deps inlined, no node_modules needed)
+    fs.copyFileSync(
+      path.join(packageRoot, "openclaw.plugin.json"),
+      path.join(pluginDir, "openclaw.plugin.json")
+    );
+    fs.copyFileSync(
+      path.join(packageRoot, "package.json"),
+      path.join(pluginDir, "package.json")
+    );
+    fs.copyFileSync(
+      path.join(packageRoot, "dist", "bundle.js"),
+      path.join(pluginDistDir, "bundle.js")
+    );
+
+    spinner2.text = "Configuring permissions...";
+
+    // Read config and write all required entries
     let config = {};
     if (fs.existsSync(OC_CONFIG_PATH)) {
-      config = JSON.parse(fs.readFileSync(OC_CONFIG_PATH, "utf-8"));
+      try { config = JSON.parse(fs.readFileSync(OC_CONFIG_PATH, "utf-8")); } catch {}
     }
 
-    // Save current plugins.allow (if exists)
-    const hadPluginsAllow = config.plugins?.allow;
-
-    // Temporarily remove plugins.allow to avoid chicken-and-egg
-    if (config.plugins?.allow) {
-      delete config.plugins.allow;
-      fs.writeFileSync(OC_CONFIG_PATH, JSON.stringify(config, null, 2));
-    }
-
-    // Install plugin
-    try {
-      execSync("openclaw plugins install @agentlinkdev/agentlink", {
-        stdio: "pipe",
-        encoding: "utf-8"
-      });
-    } catch (installErr) {
-      // Restore plugins.allow before failing
-      if (hadPluginsAllow && fs.existsSync(OC_CONFIG_PATH)) {
-        const restoreConfig = JSON.parse(fs.readFileSync(OC_CONFIG_PATH, "utf-8"));
-        if (!restoreConfig.plugins) restoreConfig.plugins = {};
-        restoreConfig.plugins.allow = hadPluginsAllow;
-        fs.writeFileSync(OC_CONFIG_PATH, JSON.stringify(restoreConfig, null, 2));
-      }
-      throw installErr;
-    }
-
-    // Re-read config (plugin install may have modified it)
-    config = JSON.parse(fs.readFileSync(OC_CONFIG_PATH, "utf-8"));
-
-    // Re-add plugins.allow (merge with existing, don't overwrite)
     if (!config.plugins) config.plugins = {};
+
+    // plugins.allow — now safe to write since files are on disk
     if (!config.plugins.allow) config.plugins.allow = [];
     if (!config.plugins.allow.includes("agentlink")) {
       config.plugins.allow.push("agentlink");
     }
-    // Restore any previously existing entries that were removed
-    if (hadPluginsAllow) {
-      for (const p of hadPluginsAllow) {
-        if (!config.plugins.allow.includes(p)) {
-          config.plugins.allow.push(p);
-        }
-      }
-    }
 
-    // Add tools.alsoAllow (CRITICAL: not tools.allow)
+    // tools.alsoAllow (CRITICAL: not tools.allow)
     if (!config.tools) config.tools = {};
     if (!config.tools.alsoAllow) config.tools.alsoAllow = [];
     if (!config.tools.alsoAllow.includes("agentlink")) {
       config.tools.alsoAllow.push("agentlink");
     }
 
-    // Always configure plugin data_dir to match CLI's DATA_DIR
-    // This ensures CLI and plugin are always in sync
+    // plugin data_dir
     if (!config.plugins.entries) config.plugins.entries = {};
     if (!config.plugins.entries.agentlink) config.plugins.entries.agentlink = {};
     if (!config.plugins.entries.agentlink.config) config.plugins.entries.agentlink.config = {};
     config.plugins.entries.agentlink.config.data_dir = DATA_DIR;
-    console.log(pc.dim(`  Configured data_dir: ${DATA_DIR}`));
 
     fs.writeFileSync(OC_CONFIG_PATH, JSON.stringify(config, null, 2));
     spinner2.succeed("Plugin installed");

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-03-20
+
+> Supersedes 0.5.1–0.5.5, which were iterative test publishes during validation.
+
+### Fixed
+- **Setup:** Skip `openclaw plugins install` entirely — that command runs a full `npm install` for the plugin's dependencies, consuming ~200MB+ and getting OOM-killed in Docker. The plugin ships as a self-contained bundle (`dist/bundle.js`) with no runtime dependencies. Setup now copies the three files OpenClaw needs (`openclaw.plugin.json`, `package.json`, `dist/bundle.js`) directly from the npx-cached package into `~/.openclaw/extensions/agentlink/`. No npm, no subprocess, no memory spike. Config (`plugins.allow`, `tools.alsoAllow`, `data_dir`) is written immediately after the copy.
+
 ## [0.5.0] - 2026-03-19
 
 ### Added
