@@ -20,6 +20,7 @@ import mqtt from "mqtt";
 import { generateAgentIdV2, isValidAgentIdV2 } from "../dist/src/types-v2.js";
 import { publishDiscoveryRecord, unpublishDiscoveryRecord, searchByIdentifier, hashIdentifier, extractShortHash } from "../dist/src/discovery.js";
 import { createContacts } from "../dist/src/contacts.js";
+import { readSharing, setProfile, setPermission, setContactOverride, removeContactOverride, getAllowedScopes, getAskScopes, getBlockedScopes, formatScopeList, ALL_SCOPES, SCOPE_LABELS } from "../dist/src/sharing.js";
 
 // Respect OpenClaw environment variables (set by Railway/Docker, not by homebrew)
 const OPENCLAW_STATE_DIR = process.env.OPENCLAW_STATE_DIR || path.join(os.homedir(), ".openclaw");
@@ -2294,6 +2295,172 @@ async function unpublishEmail(email) {
   await closeMqtt(mqttClient);
 }
 
+// ---------------------------------------------------------------------------
+// sharing command
+// ---------------------------------------------------------------------------
+
+function sharing(subArgs) {
+  const sub = subArgs[0];
+
+  if (!sub || sub === "show") {
+    // agentlink sharing — show current policy summary
+    const sharing = readSharing(DATA_DIR);
+    const allowed = getAllowedScopes(sharing);
+    const askScopes = getAskScopes(sharing);
+    const blocked = getBlockedScopes(sharing);
+
+    console.log("\n" + pc.bold("  Sharing Policy") + "\n");
+    console.log("  Profile:  " + pc.cyan(sharing.profile));
+    console.log("  Allow:    " + (allowed.length ? pc.green(formatScopeList(allowed)) : pc.dim("nothing")));
+    console.log("  Ask:      " + (askScopes.length ? pc.yellow(formatScopeList(askScopes)) : pc.dim("nothing")));
+    console.log("  Block:    " + (blocked.length ? pc.red(formatScopeList(blocked)) : pc.dim("nothing")));
+
+    // Show contact overrides
+    if (sharing.contacts && Object.keys(sharing.contacts).length > 0) {
+      console.log("\n  " + pc.bold("Contact Overrides:"));
+      for (const [agentId, contact] of Object.entries(sharing.contacts)) {
+        const overrides = contact.overrides || {};
+        const entries = Object.entries(overrides);
+        if (entries.length === 0) continue;
+        const label = contact.human_name || contact.name || agentId;
+        const items = entries.map(([scope, action]) =>
+          `${SCOPE_LABELS[scope] || scope}: ${action === "allow" ? pc.green(action) : action === "block" ? pc.red(action) : pc.yellow(action)}`
+        ).join(", ");
+        console.log(`    ${pc.cyan(label)}: ${items}`);
+      }
+    }
+    console.log();
+    return;
+  }
+
+  if (sub === "set") {
+    // agentlink sharing set <scope> <allow|ask|block>
+    const scope = subArgs[1];
+    const action = subArgs[2];
+    if (!scope || !action) {
+      console.error(pc.red("\n  Error: Missing scope or action"));
+      console.log(pc.dim("  Usage: agentlink sharing set <scope> <allow|ask|block>"));
+      console.log(pc.dim("  Scopes: " + ALL_SCOPES.join(", ") + "\n"));
+      process.exit(1);
+    }
+    if (!ALL_SCOPES.includes(scope)) {
+      console.error(pc.red(`\n  Error: Unknown scope "${scope}"`));
+      console.log(pc.dim("  Valid scopes: " + ALL_SCOPES.join(", ") + "\n"));
+      process.exit(1);
+    }
+    if (!["allow", "ask", "block"].includes(action)) {
+      console.error(pc.red(`\n  Error: Action must be allow, ask, or block (got "${action}")\n`));
+      process.exit(1);
+    }
+    setPermission(DATA_DIR, scope, action);
+    console.log(pc.green(`\n  ✓ ${SCOPE_LABELS[scope] || scope} → ${action}\n`));
+    return;
+  }
+
+  if (sub === "profile") {
+    // agentlink sharing profile <open|balanced|private>
+    const profile = subArgs[1];
+    if (!profile || !["open", "balanced", "private"].includes(profile)) {
+      console.error(pc.red(`\n  Error: Profile must be open, balanced, or private`));
+      console.log(pc.dim("  Usage: agentlink sharing profile <open|balanced|private>\n"));
+      process.exit(1);
+    }
+    setProfile(DATA_DIR, profile);
+    console.log(pc.green(`\n  ✓ Sharing profile set to "${profile}"\n`));
+    return;
+  }
+
+  console.error(pc.red(`\n  Unknown sharing subcommand: ${sub}`));
+  console.log(pc.dim("  Usage:"));
+  console.log(pc.dim("    agentlink sharing                              — show current policy"));
+  console.log(pc.dim("    agentlink sharing set <scope> <allow|ask|block> — change a permission"));
+  console.log(pc.dim("    agentlink sharing profile <open|balanced|private> — switch profile\n"));
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// trust command
+// ---------------------------------------------------------------------------
+
+function trust(subArgs) {
+  const contactName = subArgs[0];
+  if (!contactName) {
+    console.error(pc.red("\n  Error: Contact name required"));
+    console.log(pc.dim("  Usage: agentlink trust <contact> [--grant <scope>] [--revoke <scope>] [--full]\n"));
+    process.exit(1);
+  }
+
+  // Look up contact by name
+  const contacts = createContacts(DATA_DIR);
+  const all = contacts.getAll();
+  const entry = all[contactName];
+  if (!entry) {
+    console.error(pc.red(`\n  Error: Contact "${contactName}" not found`));
+    const names = Object.keys(all);
+    if (names.length > 0) {
+      console.log(pc.dim("  Available contacts: " + names.join(", ")));
+    }
+    console.log();
+    process.exit(1);
+  }
+
+  const agentId = entry.agent_id;
+  const humanName = entry.human_name || contactName;
+
+  // --full: set all scopes to allow
+  if (subArgs.includes("--full")) {
+    for (const scope of ALL_SCOPES) {
+      setContactOverride(DATA_DIR, agentId, contactName, humanName, scope, "allow");
+    }
+    console.log(pc.green(`\n  ✓ Full trust granted to ${humanName} (all scopes → allow)\n`));
+    return;
+  }
+
+  // --grant <scope>
+  const grantIdx = subArgs.indexOf("--grant");
+  if (grantIdx >= 0) {
+    const scope = subArgs[grantIdx + 1];
+    if (!scope || !ALL_SCOPES.includes(scope)) {
+      console.error(pc.red(`\n  Error: Invalid scope: ${scope || "(missing)"}`))
+;
+      console.log(pc.dim("  Valid scopes: " + ALL_SCOPES.join(", ") + "\n"));
+      process.exit(1);
+    }
+    setContactOverride(DATA_DIR, agentId, contactName, humanName, scope, "allow");
+    console.log(pc.green(`\n  ✓ ${humanName}: ${SCOPE_LABELS[scope] || scope} → allow\n`));
+    return;
+  }
+
+  // --revoke <scope>
+  const revokeIdx = subArgs.indexOf("--revoke");
+  if (revokeIdx >= 0) {
+    const scope = subArgs[revokeIdx + 1];
+    if (!scope || !ALL_SCOPES.includes(scope)) {
+      console.error(pc.red(`\n  Error: Invalid scope: ${scope || "(missing)"}`))
+;
+      console.log(pc.dim("  Valid scopes: " + ALL_SCOPES.join(", ") + "\n"));
+      process.exit(1);
+    }
+    removeContactOverride(DATA_DIR, agentId, scope);
+    console.log(pc.green(`\n  ✓ ${humanName}: ${SCOPE_LABELS[scope] || scope} override removed\n`));
+    return;
+  }
+
+  // No flags — show this contact's overrides
+  const sharing = readSharing(DATA_DIR);
+  const contactEntry = sharing.contacts?.[agentId];
+  console.log("\n  " + pc.bold(`Trust: ${humanName}`) + ` (${contactName})\n`);
+  if (!contactEntry || !contactEntry.overrides || Object.keys(contactEntry.overrides).length === 0) {
+    console.log(pc.dim("  No overrides — using base policy.\n"));
+  } else {
+    for (const [scope, action] of Object.entries(contactEntry.overrides)) {
+      const color = action === "allow" ? pc.green : action === "block" ? pc.red : pc.yellow;
+      console.log(`  ${SCOPE_LABELS[scope] || scope}: ${color(action)}`);
+    }
+    console.log();
+  }
+}
+
 // --- Main ---
 const args = process.argv.slice(2);
 const command = args[0];
@@ -2369,6 +2536,10 @@ if (command === "setup") {
   const displayNameIdx = args.indexOf("--display-name");
   const displayName = displayNameIdx >= 0 ? args[displayNameIdx + 1] : null;
   await connectToAgent(email, name, displayName);
+} else if (command === "sharing") {
+  sharing(args.slice(1));
+} else if (command === "trust") {
+  trust(args.slice(1));
 } else if (command === "unpublish") {
   const email = args[1];
   if (!email) {
@@ -2394,6 +2565,14 @@ if (command === "setup") {
   console.log("      " + pc.dim("Remove your discovery record\n"));
   console.log("    " + pc.cyan("agentlink invite [--recipient-name NAME]"));
   console.log("      " + pc.dim("Generate an invite code to share with someone\n"));
+  console.log("    " + pc.cyan("agentlink sharing"));
+  console.log("      " + pc.dim("Show current sharing policy\n"));
+  console.log("    " + pc.cyan("agentlink sharing set <scope> <allow|ask|block>"));
+  console.log("      " + pc.dim("Change a permission\n"));
+  console.log("    " + pc.cyan("agentlink sharing profile <open|balanced|private>"));
+  console.log("      " + pc.dim("Switch to a preset profile\n"));
+  console.log("    " + pc.cyan("agentlink trust <contact> [--grant <scope>] [--revoke <scope>] [--full]"));
+  console.log("      " + pc.dim("Manage per-contact sharing overrides\n"));
   console.log("    " + pc.cyan("agentlink doctor [options]"));
   console.log("      " + pc.dim("Comprehensive health check and diagnostics"));
   console.log("      " + pc.dim("Options: --format json|md, --fix, --deep, --check-mqtt, --orphaned-config\n"));

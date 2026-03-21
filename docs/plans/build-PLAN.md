@@ -206,19 +206,19 @@ bin/cli.js <-- sharing/trust CLI commands (independent, can be last)
 
 ### Checklist
 
-- [ ] Add `agentlink sharing` subcommand (read + display summary)
-- [ ] Add `agentlink sharing set` subcommand (write permission)
-- [ ] Add `agentlink sharing profile` subcommand (reset to profile)
-- [ ] Add `agentlink trust` subcommand (per-contact overrides)
+- [x] Add `agentlink sharing` subcommand (read + display summary)
+- [x] Add `agentlink sharing set` subcommand (write permission)
+- [x] Add `agentlink sharing profile` subcommand (reset to profile)
+- [x] Add `agentlink trust` subcommand (per-contact overrides)
 - [ ] Add sharing summary to end-of-setup flow
 - [ ] Add `--sharing-profile`, `--block`, `--allow` flags to setup
-- [ ] Test: `agentlink sharing` shows correct output for each profile
-- [ ] Test: `agentlink sharing set calendar.write block` updates sharing.json
-- [ ] Test: `agentlink sharing profile private` resets to private defaults
-- [ ] Test: `agentlink trust cersei --grant location.precise` adds override
-- [ ] Test: `agentlink trust cersei --full` sets all scopes to allow
-- [ ] Build and verify no errors
-- [ ] Commit
+- [x] Test: `agentlink sharing` shows correct output for each profile
+- [x] Test: `agentlink sharing set calendar.write block` updates sharing.json
+- [x] Test: `agentlink sharing profile private` resets to private defaults
+- [x] Test: `agentlink trust cersei --grant location.precise` adds override
+- [x] Test: `agentlink trust cersei --full` sets all scopes to allow
+- [x] Build and verify no errors
+- [x] Commit
 
 ---
 
