@@ -1,6 +1,7 @@
 # AgentLink PII Sharing Policy — Implementation Plan
 
 **Date:** 2026-03-20
+**Updated:** 2026-03-21
 **Status:** Draft
 **Scope:** Replace hardcoded A2A privacy block with configurable, per-human sharing policy
 
@@ -34,8 +35,27 @@ This treats all contacts identically — a spouse's agent gets the same refusal 
 | Mid-convo "ask" flow | Relay to human via pushNotification | Mirrors exec approvals: allow-once / allow-always / deny |
 | Per-contact exceptions | CLI + natural language | `agentlink trust` CLI + agent interprets NL and calls tool |
 | Policy update mechanism | New `agentlink_update_policy` tool | Type-safe, validated, single source of truth |
-| Storage | `~/.agentlink/policy.json` | Separate from identity; clean concerns |
+| Storage | `~/.agentlink/sharing.json` | Separate from identity; clean concerns |
 | Capability gaps | Policy = intent only | If tool isn't installed, agent says so naturally |
+| **Runtime loading** | **Read from file per-message, no restart** | Policy changes take effect on next A2A message without rebuild or gateway restart |
+
+---
+
+## Core Design Principle: Runtime File Loading
+
+**`sharing.json` is read from disk on every inbound A2A message.** This means:
+
+- Editing `~/.agentlink/sharing.json` (manually, via CLI, or via the `agentlink_update_policy` tool) takes effect immediately on the next A2A exchange
+- No TypeScript rebuild required
+- No gateway restart required
+- No session reset required
+
+This is critical for:
+1. **User experience** — changing a sharing preference shouldn't require technical steps
+2. **The `agentlink_update_policy` tool** — agent updates the file, next message uses the new policy
+3. **Testing** — swap sharing.json between test cases without any restart overhead
+
+**Implementation:** `formatInboundMessage()` receives the data dir path (already available via config), reads `sharing.json` at call time, and falls back to hardcoded "open" profile defaults if the file doesn't exist.
 
 ---
 
@@ -68,6 +88,7 @@ Categories without sub-scopes (preferences, financial, health) use the category 
 
 ```json
 {
+  "version": 1,
   "profile": "open",
   "permissions": {
     "calendar.read": "allow",
@@ -90,6 +111,7 @@ Categories without sub-scopes (preferences, financial, health) use the category 
 
 ```json
 {
+  "version": 1,
   "profile": "balanced",
   "permissions": {
     "calendar.read": "allow",
@@ -112,6 +134,7 @@ Categories without sub-scopes (preferences, financial, health) use the category 
 
 ```json
 {
+  "version": 1,
   "profile": "private",
   "permissions": {
     "calendar.read": "ask",
@@ -132,7 +155,7 @@ Categories without sub-scopes (preferences, financial, health) use the category 
 
 ---
 
-## policy.json Schema
+## sharing.json Schema
 
 ```json
 {
@@ -162,28 +185,28 @@ Categories without sub-scopes (preferences, financial, health) use the category 
 
 ## Phase 1: Core Policy System
 
-### 1.1 — policy.json + profiles (`src/policy.ts` — new file)
+### 1.1 — sharing.json + profiles (`src/sharing.ts` — new file)
 
 - Define `SharingProfile` type: `"open" | "balanced" | "private"`
 - Define `PermissionAction` type: `"allow" | "ask" | "block"`
-- Define `PolicyStore` class:
-  - `constructor(dataDir: string)` — loads/creates policy.json
-  - `getProfile(): SharingProfile`
-  - `resolve(scope: string, contactAgentId?: string): PermissionAction` — resolution with contact overrides
-  - `getPermissionMap(contactAgentId?: string): Record<string, PermissionAction>` — full resolved map
-  - `getAllowedScopes(contactAgentId?: string): string[]` — for prompt injection
-  - `getAskScopes(contactAgentId?: string): string[]`
-  - `setProfile(profile: SharingProfile): void`
-  - `setPermission(scope: string, action: PermissionAction): void`
-  - `setContactOverride(agentId: string, name: string, humanName: string, scope: string, action: PermissionAction): void`
-  - `removeContactOverride(agentId: string, scope: string): void`
-  - `save(): void`
-- Hardcoded profile definitions (OPEN_PROFILE, BALANCED_PROFILE, PRIVATE_PROFILE)
+- Define profile constants: `OPEN_PROFILE`, `BALANCED_PROFILE`, `PRIVATE_PROFILE`
+- Functions (stateless, read from disk each call):
+  - `readSharing(dataDir: string): SharingConfig` — reads `sharing.json`, returns defaults if missing
+  - `resolvePermission(sharing: SharingConfig, scope: string, contactAgentId?: string): PermissionAction`
+  - `getAllowedScopes(sharing: SharingConfig, contactAgentId?: string): string[]`
+  - `getAskScopes(sharing: SharingConfig, contactAgentId?: string): string[]`
+  - `getBlockedScopes(sharing: SharingConfig, contactAgentId?: string): string[]`
+  - `writeSharing(dataDir: string, sharing: SharingConfig): void` — atomic write
+  - `setProfile(dataDir: string, profile: SharingProfile): void` — resets to profile defaults
+  - `setPermission(dataDir: string, scope: string, action: PermissionAction): void`
+  - `setContactOverride(dataDir: string, agentId: string, name: string, humanName: string, scope: string, action: PermissionAction): void`
+  - `removeContactOverride(dataDir: string, agentId: string, scope: string): void`
 - Default profile for new installs: `"open"`
+- **No class / no cache** — pure functions that read/write the file. Ensures every call sees the latest state.
 
 ### 1.2 — Setup CLI changes (`bin/cli.js`)
 
-**End-of-setup summary:**
+**End-of-setup summary (after all other steps):**
 ```
 === Sharing Policy ===
 Profile: Open (default)
@@ -200,43 +223,48 @@ Profile: Open (default)
     financial info, health data
 
   Override: agentlink setup --sharing-profile balanced|private
-  Customize: agentlink policy set calendar.write block
+  Customize: agentlink sharing set calendar.write block
 ```
 
-**New CLI flags:**
+**New CLI flags for setup:**
 - `--sharing-profile <open|balanced|private>` — override default on setup
 - `--block <scope>` — block specific scope (repeatable)
 - `--allow <scope>` — allow specific scope (repeatable)
 
 **New CLI commands:**
-- `agentlink policy` — show current policy summary
-- `agentlink policy set <scope> <allow|ask|block>` — modify base permission
-- `agentlink policy profile <open|balanced|private>` — switch profile (resets to profile defaults)
+- `agentlink sharing` — show current sharing summary
+- `agentlink sharing set <scope> <allow|ask|block>` — modify base permission
+- `agentlink sharing profile <open|balanced|private>` — switch profile (resets to profile defaults)
 - `agentlink trust <contact> [--grant <scope>] [--revoke <scope>] [--full]` — per-contact exceptions
   - `--full` sets all scopes to `allow` for that contact
 
-### 1.3 — Prompt injection (`src/channel.ts`)
+### 1.3 — Dynamic prompt injection (`src/channel.ts`)
 
-Replace the hardcoded PRIVACY block in `formatInboundMessage()` with dynamic policy:
+Replace the hardcoded PRIVACY block in `formatInboundMessage()` with runtime file read:
 
 ```typescript
-// Build compact sharing policy for prompt
-const policy = config.policyStore;
-const allowed = policy.getAllowedScopes(envelope.from);
-const askScopes = policy.getAskScopes(envelope.from);
-const blocked = policy.getBlockedScopes(envelope.from);
+// Read sharing policy from disk (no restart needed for changes)
+const sharing = readSharing(config.dataDir);
+const allowed = getAllowedScopes(sharing, envelope.from);
+const askScopes = getAskScopes(sharing, envelope.from);
+const blocked = getBlockedScopes(sharing, envelope.from);
 
 lines.push(
   `SHARING POLICY (set by your human):`,
   `You MAY share: ${allowed.join(", ") || "nothing"}.`,
-  askScopes.length ? `ASK your human first (via notification) before sharing: ${askScopes.join(", ")}.` : "",
+  askScopes.length
+    ? `ASK your human first (via notification) before sharing: ${askScopes.join(", ")}.`
+    : "",
   `NEVER share: ${blocked.join(", ")}.`,
-  `Full policy: ${config.dataDir}/policy.json`,
+  `Full policy: ${config.dataDir}/sharing.json`,
   "",
 );
 ```
 
-**Key behavior change:** The prompt now tells the agent what it CAN share, not just what it can't. This flips the framing from restrictive to permissive.
+**Key behavior changes:**
+1. The prompt now tells the agent what it CAN share, not just what it can't — flips framing from restrictive to permissive
+2. Policy is read from `sharing.json` at message time — edits take effect immediately, no rebuild/restart
+3. Per-contact overrides are resolved before injection — trusted contacts get a more permissive prompt automatically
 
 ### 1.4 — Whois exposure
 
@@ -270,6 +298,7 @@ agentlink_update_policy
 This enables the NL flow:
 - Human says: "Let Bhaskar's agent write to my calendar"
 - Agent calls: `agentlink_update_policy({ action: "set_contact_override", contact: "gandalf", scope: "calendar.write", permission: "allow" })`
+- Tool writes to `sharing.json` → next A2A message picks up the change automatically
 
 ### 1.6 — Mid-conversation "ask" relay
 
@@ -291,7 +320,6 @@ When the agent encounters an "ask" scope during an A2A conversation:
 
 ## Phase 2: Refinements (future)
 
-- **Policy sync across sessions:** When policy changes mid-conversation, other active sessions pick up changes on next exchange
 - **Audit log:** Track what was shared, with whom, when (append-only log in `~/.agentlink/sharing-log.jsonl`)
 - **Control UI panel:** Visual policy editor in OpenClaw Control UI (requires OC-side work)
 - **Capability intersection:** Cross-reference policy with installed tools/skills for accurate whois
@@ -303,19 +331,19 @@ When the agent encounters an "ask" scope during an A2A conversation:
 
 | File | Change |
 |------|--------|
-| `src/policy.ts` | **NEW** — PolicyStore class, profile definitions, resolution logic |
-| `src/channel.ts` | Replace hardcoded PRIVACY block with dynamic policy injection in `formatInboundMessage()` |
-| `src/types.ts` | Add `sharing_profile` to `AgentStatus`, add `policyStore` to `AgentLinkConfig` |
+| `src/sharing.ts` | **NEW** — Pure functions for reading/writing sharing.json, profile definitions, resolution logic |
+| `src/channel.ts` | Replace hardcoded PRIVACY block with dynamic policy read from `sharing.json` in `formatInboundMessage()` |
+| `src/types.ts` | Add `sharing_profile` to `AgentStatus` |
 | `src/tools.ts` | Add `agentlink_update_policy` tool; update whois output with sharing policy |
-| `src/index.ts` | Initialize PolicyStore at plugin load; pass to channel + tools |
-| `bin/cli.js` | Add policy summary to setup; add `policy` and `trust` subcommands; add `--sharing-profile`, `--block`, `--allow` flags |
-| `~/.agentlink/policy.json` | **NEW** — runtime policy storage |
+| `src/index.ts` | Pass dataDir to channel functions (already available via config) |
+| `bin/cli.js` | Add sharing summary to setup; add `sharing` and `trust` subcommands; add `--sharing-profile`, `--block`, `--allow` flags |
+| `~/.agentlink/sharing.json` | **NEW** — runtime sharing policy (read per-message, no restart needed) |
 
 ---
 
 ## Migration
 
-- Existing installs without `policy.json`: default to `"open"` profile on first load (PolicyStore auto-creates)
+- Existing installs without `sharing.json`: default to `"open"` profile on first load (`readSharing()` returns defaults)
 - No breaking changes to identity.json or contacts.json
 - MQTT status payload addition is additive (old agents ignore new field)
-- The hardcoded PRIVACY block is removed entirely — replaced by dynamic policy
+- The hardcoded PRIVACY block is removed entirely — replaced by dynamic file-based policy
