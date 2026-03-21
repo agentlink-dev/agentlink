@@ -939,7 +939,8 @@ export function createAskHumanTool(ctx: AskHumanContext): ToolDefinition {
       // Allow decisions
       return text(
         `Your human approved sharing ${description} (decision: ${decision}). ` +
-        `You may now share this information with ${contactName}'s agent.`
+        `You MUST now include the actual ${description} in your response to ${contactName}'s agent. ` +
+        `Look it up using your tools or knowledge and share it directly. Do NOT just say "I got approval" — include the information.`
       );
     },
   };

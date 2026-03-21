@@ -7,6 +7,8 @@ import { createInvitationsStore } from "./invitations.js";
 import { createMqttService } from "./mqtt-service.js";
 import { createMessageTool, createWhoisTool, createConnectTool, createContactsTool, createLogsTool, createDebugTool, createUpdatePolicyTool, createAskHumanTool, createResolveAskTool } from "./tools.js";
 import { AskManager } from "./ask-manager.js";
+import type { AskDecision } from "./ask-manager.js";
+import { setPermission, setContactOverride } from "./sharing.js";
 import {
   handleIncomingEnvelope,
   dispatchToSession,
@@ -296,12 +298,65 @@ function register(api: PluginApi) {
 
   api.logger.info(`[AgentLink] Agent: ${config.agentId} (${config.humanName})`);
 
-  // --- Hook: track human's active channels for proactive notifications ---
+  // --- Hook: track human's active channels + ask reply interception ---
   if (api.on) {
     api.on("message_received", (event: any, ctx: any) => {
       if (ctx?.channelId === "agentlink") return;
       if (!event?.from) return;
       channelTracker.record(ctx?.channelId, event.from, ctx?.accountId, ctx?.conversationId);
+
+      // Extract message body (Slack/WhatsApp use "content", others may use "body"/"text")
+      const rawBody = (event?.content || event?.body || event?.text || "").toString().trim();
+
+      // --- Programmatic ask reply interception ---
+      // When the human replies "1"/"2"/"3"/"4" on any channel while an ask is pending,
+      // resolve the ask immediately without relying on the LLM to interpret it.
+      if (/^[1-4]$/.test(rawBody) && askManager.hasPending()) {
+        const pending = askManager.getOldestPending();
+        if (!pending) return;
+
+        const decisionMap: Record<string, AskDecision> = {
+          "1": "allow-once",
+          "2": "allow-always-contact",
+          "3": "allow-always-everyone",
+          "4": "deny",
+        };
+        const decision = decisionMap[rawBody];
+
+        // Update sharing.json for "always" decisions
+        if (decision === "allow-always-contact") {
+          const contact = contacts.findByAgentId(pending.contactAgentId);
+          setContactOverride(
+            config.dataDir,
+            pending.contactAgentId,
+            contact?.name ?? pending.contactName,
+            contact?.entry.human_name ?? pending.contactName,
+            pending.scope,
+            "allow",
+          );
+        } else if (decision === "allow-always-everyone") {
+          setPermission(config.dataDir, pending.scope, "allow");
+        }
+
+        // Resolve the ask (wakes up A2A session)
+        const inTime = askManager.resolve(pending.id, decision);
+        api.logger.info(`[AgentLink] Ask reply intercepted: ${pending.id} → ${decision} (inTime=${inTime})`);
+
+        // Mutate event so the Slack/WhatsApp LLM sees context instead of bare "1"
+        // Note: this must happen synchronously before OpenClaw processes the event
+        const optionLabels: Record<string, string> = {
+          "1": "Allow (this time)",
+          "2": `Always allow for ${pending.contactName}`,
+          "3": "Always allow for everyone",
+          "4": "Deny",
+        };
+        const mutatedContent = `[Sharing permission resolved: "${optionLabels[rawBody]}" for ${pending.contactName}'s request for ${pending.description}. Decision recorded. Confirm briefly to the human.]`;
+        event.content = mutatedContent;
+        event.body = mutatedContent;
+        event.text = mutatedContent;
+        if (event.Body) event.Body = mutatedContent;
+        if (event.BodyForAgent) event.BodyForAgent = mutatedContent;
+      }
     });
   }
 

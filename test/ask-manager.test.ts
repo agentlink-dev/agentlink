@@ -219,6 +219,51 @@ describe("hasPendingForContact", () => {
 });
 
 // ---------------------------------------------------------------------------
+// hasPending / getOldestPending
+// ---------------------------------------------------------------------------
+
+describe("hasPending", () => {
+  it("returns true when any ask is pending", () => {
+    const mgr = new AskManager(TEST_DIR);
+    mgr.register(makeRecord({ id: "ask_any_1" }), 120_000);
+    expect(mgr.hasPending()).toBe(true);
+  });
+
+  it("returns false when no asks pending", () => {
+    const mgr = new AskManager(TEST_DIR);
+    expect(mgr.hasPending()).toBe(false);
+  });
+
+  it("returns false after all asks resolved", async () => {
+    const mgr = new AskManager(TEST_DIR);
+    const promise = mgr.register(makeRecord({ id: "ask_any_2" }), 120_000);
+    mgr.resolve("ask_any_2", "deny");
+    await promise;
+    expect(mgr.hasPending()).toBe(false);
+  });
+});
+
+describe("getOldestPending", () => {
+  it("returns the oldest pending ask", () => {
+    const mgr = new AskManager(TEST_DIR);
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    mgr.register(makeRecord({ id: "ask_old", scope: "financial" }), 120_000);
+    vi.setSystemTime(new Date("2026-01-01T00:01:00Z"));
+    mgr.register(makeRecord({ id: "ask_new", scope: "health" }), 120_000);
+
+    const oldest = mgr.getOldestPending();
+    expect(oldest).not.toBeNull();
+    expect(oldest!.id).toBe("ask_old");
+    expect(oldest!.scope).toBe("financial");
+  });
+
+  it("returns null when no asks pending", () => {
+    const mgr = new AskManager(TEST_DIR);
+    expect(mgr.getOldestPending()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getPending
 // ---------------------------------------------------------------------------
 

@@ -101,6 +101,22 @@ export class AskManager {
     return false;
   }
 
+  /** Check if there are any pending asks (any contact). */
+  hasPending(): boolean {
+    return this.pending.size > 0;
+  }
+
+  /** Get the oldest pending ask (for reply interception). */
+  getOldestPending(): AskRecord | null {
+    let oldest: PendingEntry | null = null;
+    for (const entry of this.pending.values()) {
+      if (!oldest || entry.record.createdAt < oldest.record.createdAt) {
+        oldest = entry;
+      }
+    }
+    return oldest?.record ?? null;
+  }
+
   /** Get a pending record by ID (from Map or falls back to file). */
   getPending(askId: string): AskRecord | null {
     return this.pending.get(askId)?.record ?? this.readFile(askId);

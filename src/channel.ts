@@ -471,8 +471,9 @@ export function formatInboundMessage(
     if (askScopes.length) {
       lines.push(
         `ASK YOUR HUMAN FIRST before sharing: ${formatScopeList(askScopes)}.`,
-        "Use the agentlink_ask_human tool — it will notify your human and wait for their decision.",
-        "Tell the other agent you're checking with your human while you wait.",
+        "Call the agentlink_ask_human tool IMMEDIATELY — do NOT respond with any text first.",
+        "The tool will notify your human and wait for their decision.",
+        "After the tool returns, include the actual information in your response if approved.",
       );
     }
     lines.push(
