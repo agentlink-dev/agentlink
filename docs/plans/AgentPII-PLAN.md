@@ -240,7 +240,19 @@ Profile: Open (default)
 
 ### 1.3 — Dynamic prompt injection (`src/channel.ts`)
 
-Replace the hardcoded PRIVACY block in `formatInboundMessage()` with runtime file read:
+> **PRETEST SCAFFOLDING IN PLACE (2026-03-21):**
+> A temporary `sharing-prompt.txt` hook was added to `formatInboundMessage()` for pretesting.
+> It reads raw text from `~/.agentlink/sharing-prompt.txt` and injects it as the PRIVACY block.
+> This must be **replaced** by the structured `sharing.json` reader below.
+>
+> What to do:
+> 1. Remove the `sharing-prompt.txt` file-reading code (lines ~455-473 in channel.ts)
+> 2. Remove the `dataDir?: string` parameter from `formatInboundMessage()`
+> 3. Implement the production version below, which reads `sharing.json` via `readSharing()`
+>    and builds the prompt from structured permission scopes
+> 4. The function signature will change to accept a `SharingConfig` object instead of `dataDir`
+
+Replace the **pretest hook** (and original hardcoded PRIVACY block) with structured sharing.json read:
 
 ```typescript
 // Read sharing policy from disk (no restart needed for changes)
