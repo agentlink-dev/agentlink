@@ -5,7 +5,23 @@ import type { ContactsStore } from "./contacts.js";
 import type { A2ASessionManager } from "./a2a-session.js";
 import type { A2ALogWriter } from "./a2a-log.js";
 import type { InvitationsStore } from "./invitations.js";
+import type { ChannelTracker } from "./channel-tracker.js";
+import type { ChannelApi } from "./channel.js";
 import { searchByIdentifier } from "./discovery.js";
+import { AskManager } from "./ask-manager.js";
+import type { AskRecord } from "./ask-manager.js";
+import {
+  readSharing,
+  setProfile,
+  setPermission,
+  setContactOverride,
+  removeContactOverride,
+  formatScopeList,
+  ALL_SCOPES,
+  SCOPE_LABELS,
+  PROFILE_PERMISSIONS,
+} from "./sharing.js";
+import type { SharingProfile, PermissionAction } from "./sharing.js";
 import mqtt from "mqtt";
 
 // ---------------------------------------------------------------------------
@@ -682,6 +698,324 @@ export function createDebugTool(
         `3. Upload to a GitHub issue\n\n` +
         `Let me know if you need help with anything else!`
       );
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool: agentlink_update_policy
+// ---------------------------------------------------------------------------
+
+export function createUpdatePolicyTool(
+  config: AgentLinkConfig,
+  contacts: ContactsStore,
+  logger: Logger,
+): ToolDefinition {
+  const scopeList = ALL_SCOPES.map((s) => `  - ${s}: ${SCOPE_LABELS[s]}`).join("\n");
+  return {
+    name: "agentlink_update_policy",
+    label: "AgentLink: Update Sharing Policy",
+    description:
+      "Update your human's PII sharing policy. Use this when your human asks to change " +
+      "what information is shared, blocked, or requires asking.\n\n" +
+      "Actions:\n" +
+      "- set_profile: Switch to a preset profile (open/balanced/private)\n" +
+      "- set_permission: Change a base permission for a scope\n" +
+      "- set_contact_override: Set a per-contact exception\n" +
+      "- remove_contact_override: Remove a per-contact exception\n\n" +
+      `Available scopes:\n${scopeList}\n\n` +
+      "Permission values: allow, ask, block",
+    parameters: {
+      type: "object",
+      required: ["action"],
+      properties: {
+        action: {
+          type: "string",
+          enum: ["set_profile", "set_permission", "set_contact_override", "remove_contact_override"],
+          description: "The policy action to perform",
+        },
+        profile: {
+          type: "string",
+          enum: ["open", "balanced", "private"],
+          description: "Profile name (for set_profile)",
+        },
+        scope: {
+          type: "string",
+          description: "The sharing scope (e.g. 'financial', 'location.precise')",
+        },
+        permission: {
+          type: "string",
+          enum: ["allow", "ask", "block"],
+          description: "Permission value (for set_permission, set_contact_override)",
+        },
+        contact: {
+          type: "string",
+          description: "Contact name or agent ID (for contact override actions)",
+        },
+      },
+    },
+    async execute(_id, params) {
+      const action = params.action as string;
+      const dataDir = config.dataDir;
+
+      if (action === "set_profile") {
+        const profile = params.profile as SharingProfile;
+        if (!profile || !PROFILE_PERMISSIONS[profile]) {
+          return text("Error: 'profile' must be 'open', 'balanced', or 'private'.");
+        }
+        setProfile(dataDir, profile);
+        const sharing = readSharing(dataDir);
+        const summary = ALL_SCOPES.map((s) => `  ${s}: ${sharing.permissions[s] ?? "block"}`).join("\n");
+        logger.info(`[AgentLink] Sharing profile set to: ${profile}`);
+        return text(`Sharing profile updated to **${profile}**.\n\nCurrent permissions:\n${summary}`);
+      }
+
+      if (action === "set_permission") {
+        const scope = params.scope as string;
+        const permission = params.permission as PermissionAction;
+        if (!scope) return text("Error: 'scope' is required.");
+        if (!permission) return text("Error: 'permission' is required (allow/ask/block).");
+        setPermission(dataDir, scope, permission);
+        logger.info(`[AgentLink] Permission updated: ${scope} = ${permission}`);
+        return text(`Updated: **${SCOPE_LABELS[scope] || scope}** is now set to **${permission}**.`);
+      }
+
+      if (action === "set_contact_override") {
+        const scope = params.scope as string;
+        const permission = params.permission as PermissionAction;
+        const contactInput = params.contact as string;
+        if (!scope) return text("Error: 'scope' is required.");
+        if (!permission) return text("Error: 'permission' is required (allow/ask/block).");
+        if (!contactInput) return text("Error: 'contact' is required.");
+
+        const agentId = contacts.resolve(contactInput);
+        if (!agentId) return text(`Contact "${contactInput}" not found.`);
+        const contact = contacts.findByAgentId(agentId);
+        const name = contact?.name ?? contactInput;
+        const humanName = contact?.entry.human_name ?? contactInput;
+
+        setContactOverride(dataDir, agentId, name, humanName, scope, permission);
+        logger.info(`[AgentLink] Contact override: ${name} ${scope} = ${permission}`);
+        return text(`Updated: **${SCOPE_LABELS[scope] || scope}** for **${humanName}** is now **${permission}**.`);
+      }
+
+      if (action === "remove_contact_override") {
+        const scope = params.scope as string;
+        const contactInput = params.contact as string;
+        if (!scope) return text("Error: 'scope' is required.");
+        if (!contactInput) return text("Error: 'contact' is required.");
+
+        const agentId = contacts.resolve(contactInput);
+        if (!agentId) return text(`Contact "${contactInput}" not found.`);
+        const contact = contacts.findByAgentId(agentId);
+        const humanName = contact?.entry.human_name ?? contactInput;
+
+        removeContactOverride(dataDir, agentId, scope);
+        logger.info(`[AgentLink] Removed contact override: ${contactInput} ${scope}`);
+        return text(`Removed override for **${SCOPE_LABELS[scope] || scope}** on **${humanName}**. Base permission now applies.`);
+      }
+
+      return text(`Unknown action: ${action}`);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool: agentlink_ask_human
+// ---------------------------------------------------------------------------
+
+export interface AskHumanContext {
+  askManager: AskManager;
+  config: AgentLinkConfig;
+  channelTracker: ChannelTracker;
+  getChannelApi: () => ChannelApi;
+  ocConfig: Record<string, unknown>;
+  logger: Logger;
+  getRuntime: () => any;
+}
+
+export function createAskHumanTool(ctx: AskHumanContext): ToolDefinition {
+  return {
+    name: "agentlink_ask_human",
+    label: "AgentLink: Ask Human for Permission",
+    description:
+      "Ask your human for permission to share information with another agent. " +
+      "Sends a notification to your human and waits for their decision (up to 2 minutes). " +
+      "Use this when the sharing policy says ASK for a particular scope.",
+    parameters: {
+      type: "object",
+      required: ["scope", "contactAgentId", "contactName", "description"],
+      properties: {
+        scope: {
+          type: "string",
+          description: "The sharing scope being requested (e.g. 'location.precise')",
+        },
+        contactAgentId: {
+          type: "string",
+          description: "The agent ID of the requester",
+        },
+        contactName: {
+          type: "string",
+          description: "The human name of the requester",
+        },
+        description: {
+          type: "string",
+          description: "Brief description of what's being asked (e.g. 'home address')",
+        },
+      },
+    },
+    async execute(_id, params) {
+      const scope = params.scope as string;
+      const contactAgentId = params.contactAgentId as string;
+      const contactName = params.contactName as string;
+      const description = params.description as string;
+
+      if (!scope || !contactAgentId || !contactName || !description) {
+        return text("Error: all parameters (scope, contactAgentId, contactName, description) are required.");
+      }
+
+      const askId = `ask_${Date.now()}_${scope.replace(/\./g, "-")}`;
+
+      // Build notification message with askId for the human-facing session
+      const message = [
+        `[ask:${askId}] ${contactName}'s agent is asking for your ${description}.`,
+        "",
+        "1. Allow (this time)",
+        `2. Always allow for ${contactName}`,
+        "3. Always allow for everyone",
+        "4. Deny",
+      ].join("\n");
+
+      // Register with AskManager (writes file + creates Promise)
+      const record: AskRecord = {
+        id: askId,
+        scope,
+        contactAgentId,
+        contactName,
+        description,
+        createdAt: "",
+        status: "pending",
+      };
+      const decisionPromise = ctx.askManager.register(record, 120_000);
+
+      // Push notification to human (fire-and-forget)
+      const { pushNotification } = await import("./channel.js");
+      try {
+        await pushNotification({
+          message,
+          config: ctx.config,
+          channelTracker: ctx.channelTracker,
+          channelApi: ctx.getChannelApi(),
+          ocConfig: ctx.ocConfig,
+          logger: ctx.logger,
+          runtime: ctx.getRuntime(),
+        });
+      } catch (err) {
+        ctx.logger.warn(`[AgentLink] Failed to push ask notification: ${err}`);
+      }
+
+      ctx.logger.info(`[AgentLink] Ask registered: ${askId} (${scope} for ${contactName})`);
+
+      // Wait for decision (Promise resolves on human reply OR timeout)
+      const decision = await decisionPromise;
+
+      ctx.logger.info(`[AgentLink] Ask resolved: ${askId} → ${decision}`);
+
+      if (decision === "timeout") {
+        return text(
+          `Your human didn't respond within 2 minutes. ` +
+          `You cannot share ${description} right now. ` +
+          `Politely tell the other agent that your human hasn't approved sharing this information.`
+        );
+      }
+
+      if (decision === "deny") {
+        return text(
+          `Your human denied sharing ${description}. ` +
+          `Politely tell the other agent that your human prefers not to share this information.`
+        );
+      }
+
+      // Allow decisions
+      return text(
+        `Your human approved sharing ${description} (decision: ${decision}). ` +
+        `You may now share this information with ${contactName}'s agent.`
+      );
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool: agentlink_resolve_ask
+// ---------------------------------------------------------------------------
+
+export interface ResolveAskContext {
+  askManager: AskManager;
+  config: AgentLinkConfig;
+  contacts: ContactsStore;
+  logger: Logger;
+}
+
+export function createResolveAskTool(ctx: ResolveAskContext): ToolDefinition {
+  return {
+    name: "agentlink_resolve_ask",
+    label: "AgentLink: Resolve Permission Ask",
+    description:
+      "Resolve a pending sharing permission ask based on the human's decision. " +
+      "Use this when the human responds to a sharing permission notification.",
+    parameters: {
+      type: "object",
+      required: ["askId", "decision"],
+      properties: {
+        askId: {
+          type: "string",
+          description: "The pending ask ID (from the notification message)",
+        },
+        decision: {
+          type: "string",
+          enum: ["allow-once", "allow-always-contact", "allow-always-everyone", "deny"],
+          description: "The human's decision",
+        },
+      },
+    },
+    async execute(_id, params) {
+      const askId = params.askId as string;
+      const decision = params.decision as "allow-once" | "allow-always-contact" | "allow-always-everyone" | "deny";
+
+      if (!askId || !decision) {
+        return text("Error: 'askId' and 'decision' are required.");
+      }
+
+      // Get the ask record for context
+      const record = ctx.askManager.getPending(askId);
+      if (!record) {
+        return text(`No pending ask found with ID "${askId}".`);
+      }
+
+      // Update sharing.json for "always" decisions BEFORE resolving
+      const dataDir = ctx.config.dataDir;
+      if (decision === "allow-always-contact") {
+        const contact = ctx.contacts.findByAgentId(record.contactAgentId);
+        const name = contact?.name ?? record.contactName;
+        const humanName = contact?.entry.human_name ?? record.contactName;
+        setContactOverride(dataDir, record.contactAgentId, name, humanName, record.scope, "allow");
+        ctx.logger.info(`[AgentLink] Sharing updated: ${record.scope} = allow for ${record.contactAgentId}`);
+      } else if (decision === "allow-always-everyone") {
+        setPermission(dataDir, record.scope, "allow");
+        ctx.logger.info(`[AgentLink] Sharing updated: ${record.scope} = allow (base)`);
+      }
+
+      // Resolve the Promise (wakes up A2A session if still pending)
+      const inTime = ctx.askManager.resolve(askId, decision);
+
+      if (inTime) {
+        return text(`Decision recorded: ${decision}. The other agent will be notified.`);
+      } else {
+        return text(
+          `Decision recorded: ${decision}. The original conversation already ended, ` +
+          `but this preference is saved for next time.`
+        );
+      }
     },
   };
 }

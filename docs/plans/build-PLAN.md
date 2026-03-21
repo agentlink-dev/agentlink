@@ -81,19 +81,19 @@ bin/cli.js <-- sharing/trust CLI commands (independent, can be last)
 
 ### Checklist
 
-- [ ] Create `src/sharing.ts` with types and profile constants
-- [ ] Implement `readSharing()` and `writeSharing()` with atomic write
-- [ ] Implement `resolvePermission()` with contact > base > block resolution
-- [ ] Implement `getAllowedScopes()`, `getAskScopes()`, `getBlockedScopes()`
-- [ ] Implement `setProfile()`, `setPermission()`, `setContactOverride()`, `removeContactOverride()`
-- [ ] Unit test sharing.ts (resolution logic, profiles, read/write, overrides)
-- [ ] Update `channel.ts`: remove pretest hook (sharing-prompt.txt reader)
-- [ ] Update `channel.ts`: add structured sharing.json reader in `formatInboundMessage()`
-- [ ] Update `channel.ts`: add ask-scope instruction line when ask scopes present
-- [ ] Build (`npm run build`) and verify no TypeScript errors
-- [ ] Convert pretest cases to sharing.json configs
-- [ ] Re-run pretest regression (gate: 11/13 pass)
-- [ ] Commit
+- [x] Create `src/sharing.ts` with types and profile constants
+- [x] Implement `readSharing()` and `writeSharing()` with atomic write
+- [x] Implement `resolvePermission()` with contact > base > block resolution
+- [x] Implement `getAllowedScopes()`, `getAskScopes()`, `getBlockedScopes()`
+- [x] Implement `setProfile()`, `setPermission()`, `setContactOverride()`, `removeContactOverride()`
+- [x] Unit test sharing.ts (resolution logic, profiles, read/write, overrides)
+- [x] Update `channel.ts`: remove pretest hook (sharing-prompt.txt reader)
+- [x] Update `channel.ts`: add structured sharing.json reader in `formatInboundMessage()`
+- [x] Update `channel.ts`: add ask-scope instruction line when ask scopes present
+- [x] Build (`npm run build`) and verify no TypeScript errors
+- [x] Convert pretest cases to sharing.json configs
+- [x] Re-run pretest regression (gate: 11/13 pass)
+- [x] Commit
 
 ---
 
@@ -131,7 +131,7 @@ bin/cli.js <-- sharing/trust CLI commands (independent, can be last)
 - [x] Unit test: file written on register, updated on resolve, updated on timeout
 - [x] Unit test: getPending reads from Map when pending, falls back to file when timed out
 - [x] Build and verify no TypeScript errors
-- [ ] Commit
+- [x] Commit
 
 ---
 

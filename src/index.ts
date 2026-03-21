@@ -5,7 +5,8 @@ import { resolveIdentity } from "./identity.js";
 import { createContacts } from "./contacts.js";
 import { createInvitationsStore } from "./invitations.js";
 import { createMqttService } from "./mqtt-service.js";
-import { createMessageTool, createWhoisTool, createConnectTool, createContactsTool, createLogsTool, createDebugTool } from "./tools.js";
+import { createMessageTool, createWhoisTool, createConnectTool, createContactsTool, createLogsTool, createDebugTool, createUpdatePolicyTool, createAskHumanTool, createResolveAskTool } from "./tools.js";
+import { AskManager } from "./ask-manager.js";
 import {
   handleIncomingEnvelope,
   dispatchToSession,
@@ -91,6 +92,7 @@ function register(api: PluginApi) {
   const a2aManager = createA2ASessionManager(api.logger);
   const logWriter = createA2ALogWriter(config.dataDir, config.agentId, config.humanName);
   const channelTracker = createChannelTracker(config.dataDir);
+  const askManager = new AskManager(config.dataDir);
 
   // ---------------------------------------------------------------------------
   // Timer management: status updates (15s/45s), no-response (60s), silence (30s)
@@ -121,6 +123,12 @@ function register(api: PluginApi) {
     t.silence30 = setTimeout(() => {
       // Silence timeout — conversation naturally ended
       if (a2aManager.isPaused(contactAgentId) || !api.runtime?.channel) return;
+
+      // Suppress relay while an ask is pending for this contact
+      if (askManager.hasPendingForContact(contactAgentId)) {
+        api.logger.info(`[AgentLink] Skipping relay — ask pending for ${contactAgentId}`);
+        return;
+      }
 
       const ctx = a2aManager.getOriginContext(contactAgentId);
       if (ctx) {
@@ -500,6 +508,22 @@ function register(api: PluginApi) {
   api.registerTool(createContactsTool(contacts));
   api.registerTool(createLogsTool(config, contacts, logWriter));
   api.registerTool(createDebugTool(config, api.logger));
+  api.registerTool(createUpdatePolicyTool(config, contacts, api.logger));
+  api.registerTool(createAskHumanTool({
+    askManager,
+    config,
+    channelTracker,
+    getChannelApi: () => api.runtime?.channel as any,
+    ocConfig: api.config,
+    logger: api.logger,
+    getRuntime: () => api.runtime,
+  }));
+  api.registerTool(createResolveAskTool({
+    askManager,
+    config,
+    contacts,
+    logger: api.logger,
+  }));
 
   // --- CLI ---
   if (api.registerCli) {
