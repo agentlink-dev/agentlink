@@ -210,8 +210,8 @@ bin/cli.js <-- sharing/trust CLI commands (independent, can be last)
 - [x] Add `agentlink sharing set` subcommand (write permission)
 - [x] Add `agentlink sharing profile` subcommand (reset to profile)
 - [x] Add `agentlink trust` subcommand (per-contact overrides)
-- [ ] Add sharing summary to end-of-setup flow
-- [ ] Add `--sharing-profile`, `--block`, `--allow` flags to setup
+- [x] Add sharing summary to end-of-setup flow
+- [x] Add `--sharing-profile`, `--block`, `--allow` flags to setup
 - [x] Test: `agentlink sharing` shows correct output for each profile
 - [x] Test: `agentlink sharing set calendar.write block` updates sharing.json
 - [x] Test: `agentlink sharing profile private` resets to private defaults

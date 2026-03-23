@@ -247,7 +247,7 @@ async function waitForGatewayRestart(maxWaitSeconds = 120) {
   return false;
 }
 
-async function setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, locationArg, jsonOutput) {
+async function setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, locationArg, jsonOutput, sharingOpts = {}) {
   console.log("\n" + pc.bold("  AgentLink Setup") + "\n");
 
   // Step 1: Check for OpenClaw
@@ -482,10 +482,42 @@ async function setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, l
     console.log(pc.green(`  ✓ Invite code ${joinCode} will be processed on gateway start`));
   }
 
-  // Step 5: Success!
+  // Step 5: Sharing policy
+  if (sharingOpts.sharingProfile && ["open", "balanced", "private"].includes(sharingOpts.sharingProfile)) {
+    setProfile(DATA_DIR, sharingOpts.sharingProfile);
+    console.log(pc.green(`  ✓ Sharing profile: ${sharingOpts.sharingProfile}`));
+  }
+  for (const scope of (sharingOpts.allowScopes || [])) {
+    if (ALL_SCOPES.includes(scope)) {
+      setPermission(DATA_DIR, scope, "allow");
+      console.log(pc.green(`  ✓ ${SCOPE_LABELS[scope] || scope} → allow`));
+    } else {
+      console.log(pc.yellow(`  ⚠ Unknown scope: ${scope} (skipped)`));
+    }
+  }
+  for (const scope of (sharingOpts.blockScopes || [])) {
+    if (ALL_SCOPES.includes(scope)) {
+      setPermission(DATA_DIR, scope, "block");
+      console.log(pc.green(`  ✓ ${SCOPE_LABELS[scope] || scope} → block`));
+    } else {
+      console.log(pc.yellow(`  ⚠ Unknown scope: ${scope} (skipped)`));
+    }
+  }
+
+  // Show sharing summary
+  const sharingConfig = readSharing(DATA_DIR);
+  const allowed = getAllowedScopes(sharingConfig);
+  const askScopesList = getAskScopes(sharingConfig);
+  const blocked = getBlockedScopes(sharingConfig);
+
+  // Step 6: Success!
   console.log(pc.green("\n  ✓ Setup complete!\n"));
   console.log(pc.dim(`  Agent ID: ${identity.agent_id}`));
-  console.log(pc.dim(`  Data dir: ${DATA_DIR}\n`));
+  console.log(pc.dim(`  Data dir: ${DATA_DIR}`));
+  console.log(pc.dim(`  Sharing:  ${sharingConfig.profile} profile`));
+  console.log(pc.dim(`  Allow:    ${formatScopeList(allowed) || "nothing"}`));
+  console.log(pc.dim(`  Ask:      ${formatScopeList(askScopesList) || "nothing"}`));
+  console.log(pc.dim(`  Block:    ${formatScopeList(blocked) || "nothing"}\n`));
 
   // Viral loop prompt with clear next steps
   if (joinCode) {
@@ -2486,7 +2518,22 @@ if (command === "setup") {
   const jsonIdx = args.indexOf("--json");
   const jsonOutput = jsonIdx >= 0;
 
-  setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, locationArg, jsonOutput);
+  const sharingProfileIdx = args.indexOf("--sharing-profile");
+  const sharingProfileArg = sharingProfileIdx >= 0 ? args[sharingProfileIdx + 1] : undefined;
+
+  // Collect repeatable --allow and --block flags
+  const allowScopes = [];
+  const blockScopes = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--allow" && args[i + 1]) allowScopes.push(args[++i]);
+    if (args[i] === "--block" && args[i + 1]) blockScopes.push(args[++i]);
+  }
+
+  setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, locationArg, jsonOutput, {
+    sharingProfile: sharingProfileArg,
+    allowScopes,
+    blockScopes,
+  });
 } else if (command === "invite") {
   const recipientIdx = args.indexOf("--recipient-name");
   const recipientName = recipientIdx >= 0 ? args[recipientIdx + 1] : undefined;
