@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-03-23
+
+### Fixed
+- **Setup now writes sharing.json by default.** Previously, sharing.json was only created when `--sharing-profile` was explicitly passed, leaving new installs without a sharing policy on disk. The agent would display "open profile" but no policy was enforced.
+- **Default sharing profile changed to "balanced".** New installs now default to `balanced` (ask for most things) instead of `open`. This is safer for new users — sensitive data requires explicit permission.
+
+### Added
+- **`show` action on `agentlink_update_policy` tool.** Agents can now query their current sharing policy without modifying it.
+
 ## [0.6.1] - 2026-03-23
 
 ### Added

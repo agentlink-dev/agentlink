@@ -482,10 +482,13 @@ async function setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, l
     console.log(pc.green(`  ✓ Invite code ${joinCode} will be processed on gateway start`));
   }
 
-  // Step 5: Sharing policy
-  if (sharingOpts.sharingProfile && ["open", "balanced", "private"].includes(sharingOpts.sharingProfile)) {
-    setProfile(DATA_DIR, sharingOpts.sharingProfile);
-    console.log(pc.green(`  ✓ Sharing profile: ${sharingOpts.sharingProfile}`));
+  // Step 5: Sharing policy (default to "balanced" if not specified)
+  const profileToSet = (sharingOpts.sharingProfile && ["open", "balanced", "private"].includes(sharingOpts.sharingProfile))
+    ? sharingOpts.sharingProfile
+    : "balanced";
+  setProfile(DATA_DIR, profileToSet);
+  if (sharingOpts.sharingProfile) {
+    console.log(pc.green(`  ✓ Sharing profile: ${profileToSet}`));
   }
   for (const scope of (sharingOpts.allowScopes || [])) {
     if (ALL_SCOPES.includes(scope)) {

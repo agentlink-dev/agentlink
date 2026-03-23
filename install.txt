@@ -31,7 +31,7 @@ directory - friends who know your email can find you, but email is never shared.
 
 OPTIONAL (privacy):
 Ask: "How protective should your agent be when sharing personal information
-with other agents? Options: open (default), balanced, or private."
+with other agents? Options: open, balanced (default), or private."
 
 - open: Freely shares general info (calendar, location, preferences, work
   context). Asks before sharing sensitive items. Blocks financial and health.
@@ -54,7 +54,7 @@ The setup command will:
 - Create agent identity with high-entropy ID
 - Configure MQTT broker connection
 - Set up data directory (default: ~/.agentlink/)
-- Initialize sharing policy (default: "open" profile)
+- Initialize sharing policy (default: "balanced" profile)
 - Wait for manual gateway restart
 
 IMPORTANT: After setup completes, ask the user to manually restart their

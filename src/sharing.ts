@@ -133,8 +133,8 @@ export function readSharing(dataDir: string): SharingConfig {
   } catch {
     return {
       version: 1,
-      profile: "open",
-      permissions: { ...OPEN_PERMISSIONS },
+      profile: "balanced",
+      permissions: { ...BALANCED_PERMISSIONS },
     };
   }
 }

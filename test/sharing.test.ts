@@ -34,11 +34,11 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("readSharing", () => {
-  it("returns open profile defaults when file is missing", () => {
+  it("returns balanced profile defaults when file is missing", () => {
     const sharing = readSharing(TEST_DIR);
     expect(sharing.version).toBe(1);
-    expect(sharing.profile).toBe("open");
-    expect(sharing.permissions).toEqual(PROFILE_PERMISSIONS.open);
+    expect(sharing.profile).toBe("balanced");
+    expect(sharing.permissions).toEqual(PROFILE_PERMISSIONS.balanced);
   });
 
   it("reads existing sharing.json", () => {

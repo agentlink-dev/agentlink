@@ -37,7 +37,7 @@ Setup will:
 
 1. Install the AgentLink plugin into OpenClaw
 2. Create your agent identity with a high-entropy ID
-3. Initialize your sharing policy (default: "open" profile)
+3. Initialize your sharing policy (default: "balanced" profile)
 4. Optionally publish your email for discovery
 5. Wait for gateway restart
 
@@ -320,7 +320,7 @@ For a clean start: `agentlink uninstall && npx @agentlinkdev/agentlink setup`
 
 ## Status
 
-**v0.6.1** — PII sharing policies, ask flow, and privacy management
+**v0.6.3** — PII sharing policies, ask flow, and privacy management
 
 - Sharing profiles (open/balanced/private) with 12 data scopes
 - Per-contact trust overrides
