@@ -224,8 +224,8 @@ bin/cli.js <-- sharing/trust CLI commands (independent, can be last)
 
 ## Post-build
 
-- [ ] Remove any remaining pretest scaffolding (sharing-prompt.txt references)
-- [ ] Update version in package.json
-- [ ] Test locally with `reset-arya.sh --source local` before publishing
+- [x] Remove any remaining pretest scaffolding (sharing-prompt.txt references) — only in docs/plans (historical), none in src/bin
+- [x] Update version in package.json (0.5.6 → 0.6.0)
+- [x] Test locally with `reset-arya.sh --source local` before publishing
 - [ ] Publish to npm
-- [ ] Update MEMORY.md with new architecture notes
+- [x] Update MEMORY.md with new architecture notes
