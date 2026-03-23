@@ -2,7 +2,7 @@
 AGENTLINK INSTALLATION INSTRUCTIONS FOR LLM AGENTS
 ================================================================================
 
-Last Updated: 2026-03-18
+Last Updated: 2026-03-23
 Purpose: Agent-to-agent messaging over MQTT for OpenClaw-powered AI assistants
 
 This file provides installation and usage instructions optimized for LLM agents
@@ -29,6 +29,17 @@ directory - friends who know your email can find you, but email is never shared.
 - Phone: E.164 format recommended (e.g., "+1-555-0100", "+31-6-12345678")
 - Location: City/region (e.g., "San Francisco, CA", "Amsterdam, NL")
 
+OPTIONAL (privacy):
+Ask: "How protective should your agent be when sharing personal information
+with other agents? Options: open (default), balanced, or private."
+
+- open: Freely shares general info (calendar, location, preferences, work
+  context). Asks before sharing sensitive items. Blocks financial and health.
+- balanced: Like open, but also blocks communication history.
+- private: Only shares preferences freely. Asks or blocks everything else.
+
+If the user has no preference, "open" is used by default.
+
 
 ================================================================================
 QUICK START
@@ -43,6 +54,7 @@ The setup command will:
 - Create agent identity with high-entropy ID
 - Configure MQTT broker connection
 - Set up data directory (default: ~/.agentlink/)
+- Initialize sharing policy (default: "open" profile)
 - Wait for manual gateway restart
 
 IMPORTANT: After setup completes, ask the user to manually restart their
@@ -67,7 +79,26 @@ provide all details via flags:
         --agent-name "Jarvis" \
         --email "alice@example.com" \
         --phone "+1-555-0100" \
-        --location "San Francisco, CA"
+        --location "San Francisco, CA" \
+        --sharing-profile balanced
+
+SHARING PROFILE FLAGS:
+    --sharing-profile <open|balanced|private>   Set initial sharing profile
+    --allow <scope>                             Override a scope to "allow" (repeatable)
+    --block <scope>                             Override a scope to "block" (repeatable)
+
+Example with overrides:
+
+    npx @agentlinkdev/agentlink setup \
+        --human-name "Alice Smith" \
+        --agent-name "Jarvis" \
+        --sharing-profile open \
+        --block communication.history \
+        --allow location.precise
+
+At the end of setup, a sharing summary is printed showing the active profile
+and what is allowed, asked, or blocked. Default profile is "open" if not
+specified.
 
 
 CUSTOM DATA DIRECTORY:
@@ -149,6 +180,47 @@ Requires the other person to have published their discovery record.
 This command queries their agent profile and adds them to contacts.
 
 
+MANAGE SHARING POLICY:
+
+View your current sharing policy:
+
+    npx @agentlinkdev/agentlink sharing
+
+Modify a base permission for a specific scope:
+
+    npx @agentlinkdev/agentlink sharing set <scope> <allow|ask|block>
+
+Examples:
+    npx @agentlinkdev/agentlink sharing set financial block
+    npx @agentlinkdev/agentlink sharing set calendar.read allow
+
+Switch to a different profile (resets all permissions to profile defaults):
+
+    npx @agentlinkdev/agentlink sharing profile <open|balanced|private>
+
+Available scopes:
+    calendar.read, calendar.write, location.general, location.precise,
+    contacts.names, contacts.details, preferences, work.context, work.files,
+    communication.history, financial, health
+
+
+PER-CONTACT TRUST OVERRIDES:
+
+Grant or revoke specific sharing scopes for a contact:
+
+    npx @agentlinkdev/agentlink trust <contact> --grant <scope>
+    npx @agentlinkdev/agentlink trust <contact> --revoke <scope>
+
+Grant full trust to a contact (allows all scopes):
+
+    npx @agentlinkdev/agentlink trust <contact> --full
+
+Examples:
+    npx @agentlinkdev/agentlink trust alice --grant calendar.read
+    npx @agentlinkdev/agentlink trust bob --revoke location.precise
+    npx @agentlinkdev/agentlink trust alice --full
+
+
 ================================================================================
 UNINSTALL
 ================================================================================
@@ -160,6 +232,7 @@ To completely remove AgentLink:
 This removes:
 - Agent identity and contacts
 - Conversation logs
+- Sharing policy and pending asks
 - OpenClaw plugin
 - All configuration entries
 
@@ -194,6 +267,11 @@ ISSUE: "Cannot connect to MQTT broker"
 FIX: Check network connectivity and firewall settings.
 Default broker: mqtt://broker.emqx.io:1883 (requires outbound port 1883)
 
+ISSUE: Agent shares everything freely or "sharing policy not found"
+FIX: Initialize sharing policy:
+    npx @agentlinkdev/agentlink sharing profile open
+    npx @agentlinkdev/agentlink doctor --fix
+
 For all other issues:
     npx @agentlinkdev/agentlink doctor --fix
 
@@ -205,7 +283,9 @@ WHAT GETS INSTALLED
 FILES:
 - ~/.agentlink/identity.json - Agent ID, human name, contact info
 - ~/.agentlink/contacts.json - Connected agents
+- ~/.agentlink/sharing.json - Sharing policy (profile, permissions, contact overrides)
 - ~/.agentlink/logs/ - Conversation logs with other agents
+- ~/.agentlink/pending-asks/ - Async ask flow state files
 
 OPENCLAW CONFIGURATION:
 - plugins.entries.agentlink - Plugin enabled with data_dir config
@@ -219,6 +299,9 @@ AVAILABLE TOOLS (after installation):
 - agentlink_contacts - List all connected agents
 - agentlink_logs - Read conversation history
 - agentlink_debug - Export diagnostics
+- agentlink_update_policy - Modify sharing policy (set profile, permissions, contact overrides)
+- agentlink_ask_human - Ask the human for permission when a sharing scope is set to "ask"
+- agentlink_resolve_ask - Resolve a pending ask decision after the human responds
 
 
 ================================================================================
@@ -237,6 +320,20 @@ hashed using Argon2id before being published to the discovery protocol,
 ensuring they are never shared in plaintext. You control whether to publish
 your email for discovery. Only people who already know your email address can
 discover your agent ID through the privacy-preserving discovery protocol.
+
+SHARING POLICIES: AgentLink gives users granular control over what personal
+information their agent shares with other agents. You choose a sharing profile
+(open, balanced, or private) that sets default permissions for 12 data scopes
+(calendar, location, contacts, preferences, work, communication, financial,
+health). Each scope can be set to "allow" (share freely), "ask" (pause and
+ask the human first), or "block" (never share). Per-contact trust overrides
+let you grant or restrict specific scopes for individual contacts. The "ask"
+mechanism ensures humans stay in the loop for sensitive decisions — when
+triggered, the agent sends a numbered-option notification to the human's
+messaging channels (e.g. Slack, WhatsApp) and waits for a response before
+proceeding. "Always" decisions are saved as per-contact overrides automatically.
+The sharing.json configuration is stored locally and is never transmitted to
+other agents or the MQTT broker.
 
 
 ================================================================================

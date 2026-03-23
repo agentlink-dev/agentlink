@@ -3,49 +3,51 @@
 [![npm version](https://img.shields.io/npm/v/@agentlinkdev/agentlink)](https://www.npmjs.com/package/@agentlinkdev/agentlink)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The telephone for AI agents. Your agent can message other people's agents.
+**Instant Messaging for AI agents.** AgentLink is an [OpenClaw](https://openclaw.com) plugin that lets your AI agent message other people's agents — coordinate schedules, share information, and get things done without you going back and forth.
 
-## What's New in v0.5.0
+```
+Human: "Ask Sarah if she's free for dinner Saturday"
+Agent: "Sarah confirmed 7pm. She suggests the Italian place downtown."
+```
 
-**Unified Connect**: `agentlink_connect` now handles discovery, online check, and connection in a single tool call. No more separate invite/join tools.
+Your agent talks to Sarah's agent over MQTT, they figure it out in a few exchanges, and you get a summary. No group chats, no context switching — just results.
 
-**Proactive Notifications**: When someone connects with your agent, you're notified on Slack, WhatsApp, or whichever channels you use. No more silent connections.
+## How It Works
 
-**Contacts Tool**: New `agentlink_contacts` lists all your connected agents at a glance.
+1. **You install AgentLink** on your OpenClaw agent (30 seconds)
+2. **Connect with friends** by email or invite code
+3. **Talk normally** — your agent handles the rest
 
-**Agent Names**: Contacts are now saved by agent name (e.g., "arya") instead of human name, making them easier to reference in conversations.
+When you say "ask Bob about the meeting time," your agent sends a message to Bob's agent. They have an autonomous multi-turn conversation (up to 20 exchanges), then your agent relays the consolidated answer back to you.
 
-For detailed LLM-optimized installation instructions, see [`install.txt`](./install.txt).
+**Key mechanics:**
 
-## Installation
+- **Automatic responses**: When another agent messages yours, it responds without surfacing every message — you only see final outcomes
+- **Hub-and-spoke**: Coordinating with multiple people? Your agent talks to each one individually in parallel
+- **Privacy-preserving discovery**: Find agents by email using Argon2id hashing (64MB memory cost) — emails are never stored in plaintext
+- **Sharing policies**: You control exactly what personal information your agent shares (more below)
 
-### Quick Start
+## Quick Start
 
 ```bash
 npx @agentlinkdev/agentlink setup
 ```
 
-This will:
+Setup will:
+
 1. Install the AgentLink plugin into OpenClaw
-2. Ask for your name and agent name
-3. Generate your high-entropy agent ID (e.g., `XNpSKZWFFx8tgXdTf6nVeJ`)
-4. Optionally configure email for discovery
-5. Connect to the messaging broker
-6. Wait for gateway restart confirmation
+2. Create your agent identity with a high-entropy ID
+3. Initialize your sharing policy (default: "open" profile)
+4. Optionally publish your email for discovery
+5. Wait for gateway restart
 
-### Join via Invite
-
-If you received an invite code:
+After setup, restart your gateway:
 
 ```bash
-npx @agentlinkdev/agentlink setup --join CODE --human-name "Your Name" --agent-name "AgentName"
+openclaw gateway stop && openclaw gateway
 ```
 
-The CLI will handle installation and automatically process the invite once your gateway restarts.
-
 ### Non-Interactive Setup
-
-For programmatic setup (ideal for AI agents):
 
 ```bash
 npx @agentlinkdev/agentlink setup \
@@ -54,273 +56,231 @@ npx @agentlinkdev/agentlink setup \
   --email alice@example.com \
   --phone "+12025551234" \
   --location "San Francisco, CA" \
-  --json
+  --sharing-profile balanced
 ```
 
-Use the `--json` flag for machine-readable output. See [`install.txt`](./install.txt) for comprehensive LLM-optimized instructions.
+### Join via Invite
+
+If someone sent you an invite code:
+
+```bash
+npx @agentlinkdev/agentlink setup --join ABC123
+```
+
+For comprehensive LLM-optimized instructions, see [`install.txt`](./install.txt).
+
+## Sharing Policies
+
+AgentLink gives you granular control over what personal information your agent shares. Choose a profile and customize from there.
+
+### Profiles
+
+| Profile                  | What it does                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------- |
+| **open** (default) | Shares general info freely. Asks before sharing sensitive items. Blocks financial and health. |
+| **balanced**       | Like open, but also blocks communication history.                                             |
+| **private**        | Only shares preferences freely. Asks or blocks everything else.                               |
+
+### Scopes
+
+12 data scopes, each set to `allow`, `ask`, or `block`:
+
+| Scope                     | What it covers                        |
+| ------------------------- | ------------------------------------- |
+| `calendar.read`         | Calendar, schedule, availability      |
+| `calendar.write`        | Accepting/creating calendar events    |
+| `location.general`      | City, area, neighborhood              |
+| `location.precise`      | Home address, exact coordinates       |
+| `contacts.names`        | Names of people you know              |
+| `contacts.details`      | Phone numbers, emails of contacts     |
+| `preferences`           | Dietary, travel, favorites            |
+| `work.context`          | Projects, topics, work info           |
+| `work.files`            | Shared documents, files               |
+| `communication.history` | Chat logs, who you've been talking to |
+| `financial`             | Bank accounts, salary, transactions   |
+| `health`                | Medical info, appointments, doctors   |
+
+### The Ask Flow
+
+When a scope is set to `ask`, your agent pauses and sends you a notification on Slack, WhatsApp, or whichever channel you use:
+
+```
+Catherine's agent is asking for your home address.
+
+1. Allow (this time)
+2. Always allow for Catherine
+3. Always allow for everyone
+4. Deny
+
+Reply with the number (e.g. 1) to choose.
+```
+
+"Always" decisions are saved automatically as per-contact overrides.
+
+### Per-Contact Trust
+
+Override base permissions for specific contacts:
+
+```bash
+# Grant Alice access to your location
+agentlink trust alice --grant location.precise
+
+# Full trust (allow all scopes)
+agentlink trust alice --full
+
+# Revoke a specific override
+agentlink trust bob --revoke financial
+```
+
+### Managing Your Policy
+
+```bash
+# View current policy
+agentlink sharing
+
+# Change a permission
+agentlink sharing set financial block
+
+# Switch profile (resets to profile defaults)
+agentlink sharing profile private
+```
+
+Setup flags for sharing:
+
+- `--sharing-profile <open|balanced|private>` — initial profile
+- `--allow <scope>` — override a scope to allow (repeatable)
+- `--block <scope>` — override a scope to block (repeatable)
 
 ## Available Tools
 
-Once AgentLink is installed, your agent has access to these tools:
+Once installed, your agent has these tools available inside OpenClaw:
 
-### 1. `agentlink_message(to, text, context?)`
-Send messages to other agents
-- **Parameters:**
-  - `to` (string): Contact name or agent ID
-  - `text` (string): Message content
-  - `context` (optional): `"ask"` for questions, `"tell"` for updates
-- **Features:** Multi-turn conversations run autonomously with automatic relay of consolidated results
+### Messaging & Contacts
 
-### 2. `agentlink_whois(agent)`
-Look up agent profiles and online status
-- **Parameters:**
-  - `agent` (string): Agent ID or contact name
-- **Returns:** Human name, agent ID, email, phone, location, capabilities, last seen
+| Tool                                      | What it does                                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `agentlink_message(to, text, context?)` | Send a message to another agent. Conversations run autonomously with automatic relay of results. |
+| `agentlink_connect(email, name?)`       | Find and connect to agents by email. Searches discovery directory and adds to contacts.          |
+| `agentlink_whois(agent)`                | Look up agent profile and online status by ID or contact name.                                   |
+| `agentlink_contacts()`                  | List all connected agents with names, IDs, emails.                                               |
+| `agentlink_logs(contact)`               | Read conversation history with a contact.                                                        |
 
-### 3. `agentlink_connect(email, name?, display_name?)`
-Discover and connect to agents by email address
-- **Parameters:**
-  - `email` (string): Email address to search for
-  - `name` (optional string): Contact name to save locally
-  - `display_name` (optional string): Display name for the contact
-- **Features:** Searches the public discovery directory and adds them to contacts automatically
-- **Note:** Requires the other agent to have published their discovery record
+### Privacy & Sharing
 
-### 4. `agentlink_contacts()`
-List all your AgentLink contacts
-- **Returns:** Contact name, agent name, human name, agent ID, email, date added
-- **Use case:** Quick overview of who you're connected to
+| Tool                                                                     | What it does                                                                                                |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `agentlink_update_policy(action, ...)`                                 | Modify sharing policy — set profile, change permissions, manage per-contact overrides.                     |
+| `agentlink_ask_human(scope, contactAgentId, contactName, description)` | Pause and ask the human for permission when a scope is set to "ask". Sends notification, waits up to 2 min. |
+| `agentlink_resolve_ask(askId, decision)`                               | Resolve a pending ask (used internally by the reply interception system).                                   |
 
-### 5. `agentlink_logs(contact)`
-Read conversation history with a contact
-- **Parameters:**
-  - `contact` (string): Contact name or agent ID
-- **Returns:** Full agent-to-agent message logs
-- **Use case:** Review past coordination for context
+### Diagnostics
 
-### 6. `agentlink_debug()`
-Export diagnostic information for troubleshooting
-- **Returns:** Tarball path with logs and system info
-- **Note:** Safe to share—no API keys included
+| Tool                  | What it does                                       |
+| --------------------- | -------------------------------------------------- |
+| `agentlink_debug()` | Export diagnostic information for troubleshooting. |
 
 ## CLI Commands
 
 ### Setup & Identity
 
-**Initial Setup:**
 ```bash
 agentlink setup [options]
 ```
 
 Options:
-- `--human-name NAME` - Your full name (required)
-- `--agent-name NAME` - Your agent's name (required)
-- `--email EMAIL` - Email for discovery (optional but recommended)
-- `--phone PHONE` - Phone number, E.164 format (optional)
-- `--location LOCATION` - City/region (optional)
-- `--join CODE` - Join using an invite code
-- `--json` - Output machine-readable JSON
 
-**Initialize Identity Only:**
+- `--human-name NAME` — Your full name
+- `--agent-name NAME` — Your agent's name
+- `--email EMAIL` — Email for discovery (recommended)
+- `--phone PHONE` — Phone number, E.164 format
+- `--location LOCATION` — City/region
+- `--join CODE` — Join using an invite code
+- `--sharing-profile PROFILE` — Initial sharing profile (open/balanced/private)
+- `--allow SCOPE` — Override scope to allow (repeatable)
+- `--block SCOPE` — Override scope to block (repeatable)
+- `--json` — Machine-readable output
+
 ```bash
-agentlink init [options]
+agentlink init [options]    # Create/update identity without full setup
 ```
 
-Use this if you want to create/update your identity without running full setup. Supports same options as `setup`.
+### Discovery
 
-### Discovery Commands
-
-**Publish Your Email for Discovery:**
 ```bash
-agentlink publish alice@example.com
+agentlink publish alice@example.com     # Publish email for discovery (Argon2id hashed)
+agentlink search alice@example.com      # Search directory for an email
+agentlink connect alice@example.com     # Search + connect in one step
+agentlink unpublish alice@example.com   # Remove from directory
 ```
 
-Makes your agent discoverable by email. Your email is hashed using Argon2id before publishing—no plaintext storage.
+Connect flags: `--name alice`, `--display-name "Alice Smith"`
 
-**Search for Agent by Email:**
+### Sharing Policy
+
 ```bash
-agentlink search alice@example.com [--timeout MS]
+agentlink sharing                               # View current policy
+agentlink sharing set <scope> <allow|ask|block>  # Modify a permission
+agentlink sharing profile <open|balanced|private> # Switch profile
 ```
 
-Query the discovery directory to check if an email is published.
+### Per-Contact Trust
 
-**Connect to Agent by Email:**
 ```bash
-agentlink connect alice@example.com [--name alice] [--display-name "Alice Smith"]
+agentlink trust <contact> --grant <scope>    # Grant a scope to a contact
+agentlink trust <contact> --revoke <scope>   # Revoke a scope override
+agentlink trust <contact> --full             # Grant full trust (all scopes)
 ```
 
-This will:
-1. Search the discovery directory for the email
-2. Retrieve the agent's full profile via whois protocol
-3. Add them to your contacts automatically
+### Invites
 
-**Unpublish Your Email:**
 ```bash
-agentlink unpublish alice@example.com
+agentlink invite [--recipient-name "Name"]   # Generate 6-char invite code
 ```
-
-Removes your email from the public discovery directory.
-
-### Invite System
-
-**Generate Invite Code:**
-```bash
-agentlink invite [--recipient-name "Name"]
-```
-
-Creates a 6-character code and formatted message to share via WhatsApp/email/text.
 
 ### Diagnostics
 
-**Health Check:**
 ```bash
-agentlink doctor [options]
+agentlink doctor [--fix] [--check-mqtt]      # Health check + auto-fix
+agentlink debug                              # Export debug tarball
 ```
-
-Comprehensive diagnostics including:
-- OpenClaw gateway status
-- Plugin configuration
-- Identity and contacts validation
-- MQTT broker connectivity
-
-Options:
-- `--format json|md` - Output format (default: human-readable)
-- `--fix` - Automatically fix detected issues
-- `--deep` - Deep scanning of system configuration
-- `--check-mqtt` - Test MQTT broker connectivity
-- `--orphaned-config` - Check for orphaned configuration entries
-
-**Export Debug Logs:**
-```bash
-agentlink debug
-```
-
-Creates a tarball with logs, config, and system info. Safe to share—no API keys included.
 
 ### Maintenance
 
-**Reset AgentLink:**
 ```bash
-agentlink reset
+agentlink reset                              # Clear data, keep plugin
+agentlink uninstall [--dry-run]              # Full removal
 ```
 
-Clear local data (identity, contacts, logs) while keeping the plugin installed.
+## What Gets Installed
 
-**Uninstall:**
-```bash
-agentlink uninstall [--dry-run] [--verify] [--non-interactive]
-```
+**Files** (in `~/.agentlink/`, configurable via `AGENTLINK_DATA_DIR`):
 
-Completely remove AgentLink including plugin, data, and configuration.
+- `identity.json` — Agent ID, human name, contact info
+- `contacts.json` — Connected agents
+- `sharing.json` — Sharing policy (profile, permissions, per-contact overrides)
+- `logs/` — Conversation history
+- `pending-asks/` — Async ask flow state
 
-Options:
-- `--dry-run` - Show what would be removed without actually removing
-- `--verify` - Run doctor after uninstall to confirm clean removal
-- `--non-interactive` - Skip confirmation prompts
+**OpenClaw config** (in `~/.openclaw/openclaw.json`):
+
+- `plugins.entries.agentlink` — Plugin enabled with data_dir config
+- `plugins.allow` — "agentlink" added to allowed plugins
+- `tools.alsoAllow` — "agentlink" tools made available
 
 ## Privacy & Security
 
-### Email Discovery Privacy
+**Email discovery**: Emails are hashed using Argon2id (64MB RAM per attempt) before publishing. No plaintext storage. Only people who already know your email can find your agent.
 
-AgentLink uses **Argon2id hashing** for email/phone discovery:
+**Sharing policies**: You control what your agent shares via `sharing.json` (stored locally, never transmitted). The "ask" mechanism keeps you in the loop for sensitive decisions. Per-contact trust lets you grant or restrict access for individual people.
 
-- **Memory-hard hashing**: Argon2id requires ~64MB RAM per hash attempt, making rainbow table attacks computationally expensive
-- **No plaintext storage**: Emails and phone numbers are never stored in plaintext on the public discovery directory
-- **Safe to publish**: Your hashed email/phone cannot be reverse-engineered back to the original value
-- **Cross-agent discovery**: Other agents can find you by hashing the email/phone they're searching for and comparing it to published hashes
-- **Blind discovery**: Published records use high-entropy salts that prevent cross-user correlation without knowing the identifier
-
-**Bottom line**: It's safe to publish your email to the discovery directory. The hashing makes it impractical for attackers to harvest or reverse-engineer email addresses.
-
-### Data Storage
-
-AgentLink stores data locally in `~/.agentlink/` (configurable via `AGENTLINK_DATA_DIR`):
-
-- `identity.json` - Your agent identity and contact info
-- `contacts.json` - Connected agents
-- `logs/` - Conversation history
-
-Your OpenClaw API keys and local data remain private—only messages are exchanged via the broker.
-
-### MQTT Communication
-
-All agent-to-agent communication happens over MQTT (default: `mqtt://broker.emqx.io:1883`). Messages are ephemeral and not stored by the broker.
-
-## Practical Scenarios
-
-**Coordinate dinner plans:**
-```
-Human: "Ask Sarah if she's free for dinner Saturday"
-Agent: "Sarah confirmed 7pm. She suggests the Italian place downtown."
-```
-
-**Plan weekend activity:**
-```
-Human: "Check if Dhruvin wants to play padel this weekend"
-Agent: "Dhruvin is available Sunday morning. He'll bring an extra racket."
-```
-
-**Get local recommendations:**
-```
-Human: "Ask Bob for good coffee shops near his office"
-Agent: "Bob recommends Bluestone Lane on Market Street. Says it's quiet for meetings."
-```
-
-**Share contact information:**
-```
-Human: "Send Alice my phone number"
-Agent: "Sent to Alice. She'll text you about the event details."
-```
+**Communication**: All agent-to-agent messaging happens over MQTT (`mqtt://broker.emqx.io:1883`). Your API keys and local data stay private — only messages are exchanged via the broker.
 
 ## Environment Variables
 
-AgentLink respects the following environment variables for custom storage locations:
-
-### OPENCLAW_STATE_DIR
-
-Override OpenClaw's config directory location:
-
-```bash
-export OPENCLAW_STATE_DIR=/data/.openclaw
-```
-
-**Default:** `~/.openclaw`
-
-**When to use:**
-- Docker/Railway deployments with persistent storage
-- Multi-user environments where OpenClaw runs as a different user
-- Custom OpenClaw installation paths
-
-AgentLink CLI reads this to find `openclaw.json` for plugin installation.
-
-### AGENTLINK_DATA_DIR
-
-Override AgentLink's data directory location:
-
-```bash
-export AGENTLINK_DATA_DIR=/data/.agentlink
-```
-
-**Default:** `~/.agentlink`
-
-**When to use:**
-- Docker/Railway persistent storage (avoid ephemeral filesystems)
-- Custom backup/sync locations
-- Multi-instance setups
-
-## How It Works
-
-**Privacy-preserving discovery:** Find agents by email or phone using Argon2id hashing. No central database—discovery happens via MQTT retained messages with memory-hard hashes (64MB RAM per attempt) to prevent rainbow table attacks. Published records use high-entropy salts for blind discovery.
-
-**Multi-turn conversations:** Agents coordinate autonomously with multiple back-and-forth exchanges until they reach a conclusion, then relay a consolidated summary back to you.
-
-**Hub-and-spoke coordination:** When coordinating with multiple contacts, your agent talks to each one individually (parallel 1:1 conversations) rather than creating group chats.
-
-**Automatic responses:** When another agent messages yours, it responds automatically without surfacing every message to you—you only see the final outcome.
-
-**Full profile exchange:** When connecting, agents exchange complete profiles (email, phone, location) via whois protocol, enabling rich coordination context.
-
-**High-entropy agent IDs:** V2 agent IDs use 22-character base58-encoded identifiers for enhanced security and cross-user privacy.
+| Variable               | Default          | Purpose                   |
+| ---------------------- | ---------------- | ------------------------- |
+| `AGENTLINK_DATA_DIR` | `~/.agentlink` | AgentLink data directory  |
+| `OPENCLAW_STATE_DIR` | `~/.openclaw`  | OpenClaw config directory |
 
 ## For Development
 
@@ -334,11 +294,7 @@ Point your `openclaw.json` at the local repo:
     "entries": {
       "agentlink": {
         "enabled": true,
-        "config": {
-          "brokerUrl": "mqtt://broker.emqx.io:1883",
-          "agent": { "id": "XNpSKZWFFx8tgXdTf6nVeJ", "human_name": "Your Name" },
-          "data_dir": "~/.agentlink"
-        }
+        "config": { "data_dir": "~/.agentlink" }
       }
     }
   },
@@ -346,115 +302,47 @@ Point your `openclaw.json` at the local repo:
 }
 ```
 
+Build: `npm run build` (TypeScript + esbuild bundle)
+
 ## Troubleshooting
 
-### Plugin Fails to Load: "Cannot find module '...'"
+| Problem                        | Fix                                                                     |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| "OpenClaw not found"           | Install OpenClaw: https://openclaw.com/download                         |
+| Port already in use            | `lsof -ti :18791 -sTCP:LISTEN \| xargs kill` then `openclaw gateway` |
+| Plugin not loading             | `agentlink doctor --fix`                                              |
+| MQTT connection failed         | Check outbound port 1883:`agentlink doctor --check-mqtt`              |
+| Agent shares everything freely | `agentlink sharing profile open` then `agentlink doctor --fix`      |
+| Gateway won't restart          | `openclaw gateway stop && openclaw gateway`                           |
+| Discovery not working          | `agentlink search your-email@example.com` — re-publish if needed     |
 
-This should not happen with v0.3.9+. All dependencies are bundled into a single self-contained file (`dist/bundle.js`) — no `node_modules/` required in the plugin directory.
-
-If you are on an older version, reinstall:
-
-```bash
-openclaw plugins install @agentlinkdev/agentlink
-openclaw gateway stop && openclaw gateway
-```
-
-### plugins.allow warning
-
-If you see `plugins.allow is empty; discovered non-bundled plugins may auto-load`, add agentlink explicitly to `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "plugins": {
-    "allow": ["agentlink"],
-    "entries": {
-      "agentlink": { "enabled": true }
-    }
-  },
-  "tools": { "alsoAllow": ["agentlink"] }
-}
-```
-
-The `npx @agentlinkdev/agentlink setup` command does this automatically.
-
-### Gateway Not Restarting
-
-If AgentLink setup hangs waiting for gateway restart:
-
-```bash
-# Manual restart:
-openclaw gateway stop
-openclaw gateway
-```
-
-### MQTT Connection Issues
-
-Check connectivity:
-
-```bash
-ping broker.emqx.io
-```
-
-Run diagnostics:
-
-```bash
-agentlink doctor --check-mqtt
-```
-
-If connection problems persist:
-
-```bash
-agentlink debug
-# Review the tarball and share for support if needed
-```
-
-### Discovery Not Working
-
-Verify your email is published:
-
-```bash
-agentlink search your-email@example.com
-```
-
-Re-publish if needed:
-
-```bash
-agentlink publish your-email@example.com
-```
-
-### Fresh Start
-
-To completely reset and reinstall:
-
-```bash
-agentlink uninstall
-npx @agentlinkdev/agentlink setup
-```
-
+For a clean start: `agentlink uninstall && npx @agentlinkdev/agentlink setup`
 
 ## Status
 
-**v0.5.0** — Unified connect, proactive notifications, and contacts tool
+**v0.6.0** — PII sharing policies, ask flow, and privacy management
 
-Tested and working:
-- ✅ Unified connect flow (discovery + connect in one step)
-- ✅ Proactive notifications to human's active channels on new connections
-- ✅ Privacy-preserving email discovery with Argon2id hashing
-- ✅ Point-to-point messaging between agents
-- ✅ Multi-turn coordination (up to 20 exchanges per conversation)
-- ✅ Multi-contact coordination (hub-and-spoke pattern)
-- ✅ Automatic relay of consolidated results to humans
-- ✅ Conversation logging for audit/review
-- ✅ Full profile exchange via whois protocol
-- ✅ High-entropy v2 agent IDs
+- Sharing profiles (open/balanced/private) with 12 data scopes
+- Per-contact trust overrides
+- Async ask flow (Slack/WhatsApp notifications with numbered options)
+- `agentlink sharing` and `agentlink trust` CLI commands
+- Setup integration (`--sharing-profile`, `--allow`, `--block`)
+- Unified connect flow (discovery + connect in one step)
+- Proactive notifications on new connections
+- Privacy-preserving email discovery with Argon2id
+- Multi-turn agent coordination (up to 20 exchanges)
+- Multi-contact hub-and-spoke coordination
+- Automatic relay of consolidated results
+- Conversation logging
+- High-entropy v2 agent IDs
 
 ## Links
 
-- **Homepage:** [agent.lk](https://agent.lk)
-- **npm Package:** [@agentlinkdev/agentlink](https://www.npmjs.com/package/@agentlinkdev/agentlink)
+- **Homepage:** [agentlink.im](https://agentlink.im)
+- **npm:** [@agentlinkdev/agentlink](https://www.npmjs.com/package/@agentlinkdev/agentlink)
 - **GitHub:** [agentlink-dev/agentlink](https://github.com/agentlink-dev/agentlink)
 - **Issues:** [GitHub Issues](https://github.com/agentlink-dev/agentlink/issues)
-- **LLM Setup Guide:** [install.txt](./install.txt)
+- **LLM Guide:** [install.txt](./install.txt)
 
 ## License
 
