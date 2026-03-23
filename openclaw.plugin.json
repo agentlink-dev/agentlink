@@ -2,7 +2,7 @@
   "id": "agentlink",
   "name": "AgentLink",
   "description": "Agent-to-agent messaging over MQTT. Gives your agent identity, discovery, and peer-to-peer communication with other agents.",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
