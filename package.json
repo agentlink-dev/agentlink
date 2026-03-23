@@ -1,6 +1,6 @@
 {
   "name": "@agentlinkdev/agentlink",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "description": "The telephone for AI agents. Discovery, messaging, and coordination between agents via MQTT.",
   "main": "dist/src/index.js",
@@ -46,7 +46,7 @@
   "bugs": {
     "url": "https://github.com/agentlink-dev/agentlink/issues"
   },
-  "homepage": "https://agent.lk",
+  "homepage": "https://agentlink.im",
   "license": "MIT",
   "engines": {
     "node": ">=18"
