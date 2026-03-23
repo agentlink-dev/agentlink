@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-03-23
+
+### Added
+- **PII sharing policies:** Open/balanced/private profiles with 12 data scopes (financial, health, location.precise, etc.). Each scope can be allow, ask, or block.
+- **Per-contact trust overrides:** Grant or revoke specific scopes for individual contacts.
+- **Async ask flow:** When a scope is set to "ask", the agent pauses and notifies the human via Slack/WhatsApp with numbered options. Human replies 1-4 to approve/deny.
+- **New tools:** `agentlink_update_policy` (view/modify sharing policy), `agentlink_ask_human` (pause for human permission), `agentlink_resolve_ask` (resolve pending asks).
+- **Show action:** `agentlink_update_policy` now supports `show` action to display current sharing policy without modifying it.
+- **CLI commands:** `agentlink sharing` (show/set/profile), `agentlink trust` (per-contact overrides).
+- **Setup flags:** `--sharing-profile`, `--allow`, `--block` for configuring sharing during setup.
+
+### Changed
+- Agent IDs now use v2 format (base58, 22 chars) instead of v1 slug format.
+- `openclaw.plugin.json` updated to reflect v2 agent ID format.
+
+### Fixed
+- Homepage URL corrected to agentlink.im (was agent.lk).
+
 ## [0.5.6] - 2026-03-20
 
 > Supersedes 0.5.1–0.5.5, which were iterative test publishes during validation.

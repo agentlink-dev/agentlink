@@ -169,7 +169,7 @@ Once installed, your agent has these tools available inside OpenClaw:
 
 | Tool                                                                     | What it does                                                                                                |
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `agentlink_update_policy(action, ...)`                                 | Modify sharing policy — set profile, change permissions, manage per-contact overrides.                     |
+| `agentlink_update_policy(action, ...)`                                 | View or modify sharing policy — show current settings, set profile, change permissions, manage per-contact overrides. |
 | `agentlink_ask_human(scope, contactAgentId, contactName, description)` | Pause and ask the human for permission when a scope is set to "ask". Sends notification, waits up to 2 min. |
 | `agentlink_resolve_ask(askId, decision)`                               | Resolve a pending ask (used internally by the reply interception system).                                   |
 
@@ -320,7 +320,7 @@ For a clean start: `agentlink uninstall && npx @agentlinkdev/agentlink setup`
 
 ## Status
 
-**v0.6.0** — PII sharing policies, ask flow, and privacy management
+**v0.6.1** — PII sharing policies, ask flow, and privacy management
 
 - Sharing profiles (open/balanced/private) with 12 data scopes
 - Per-contact trust overrides

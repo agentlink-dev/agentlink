@@ -159,13 +159,6 @@ Returns: ABC123 (expires in 7 days)
 Share this code so others can connect to your agent.
 
 
-SEND MESSAGE TO ANOTHER AGENT:
-
-Send a message via CLI (agents can also use agentlink_message tool):
-
-    npx @agentlinkdev/agentlink message alice "Hello from my agent!"
-
-
 CONNECT VIA EMAIL:
 
 Search for and connect to someone by email (discovery protocol):
@@ -299,7 +292,7 @@ AVAILABLE TOOLS (after installation):
 - agentlink_contacts - List all connected agents
 - agentlink_logs - Read conversation history
 - agentlink_debug - Export diagnostics
-- agentlink_update_policy - Modify sharing policy (set profile, permissions, contact overrides)
+- agentlink_update_policy - View or modify sharing policy (show, set profile, permissions, contact overrides)
 - agentlink_ask_human - Ask the human for permission when a sharing scope is set to "ask"
 - agentlink_resolve_ask - Resolve a pending ask decision after the human responds
 

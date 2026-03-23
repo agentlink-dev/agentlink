@@ -716,9 +716,10 @@ export function createUpdatePolicyTool(
     name: "agentlink_update_policy",
     label: "AgentLink: Update Sharing Policy",
     description:
-      "Update your human's PII sharing policy. Use this when your human asks to change " +
-      "what information is shared, blocked, or requires asking.\n\n" +
+      "View or update your human's PII sharing policy. Use this when your human asks to see " +
+      "or change what information is shared, blocked, or requires asking.\n\n" +
       "Actions:\n" +
+      "- show: Display the current sharing policy (no parameters needed)\n" +
       "- set_profile: Switch to a preset profile (open/balanced/private)\n" +
       "- set_permission: Change a base permission for a scope\n" +
       "- set_contact_override: Set a per-contact exception\n" +
@@ -731,7 +732,7 @@ export function createUpdatePolicyTool(
       properties: {
         action: {
           type: "string",
-          enum: ["set_profile", "set_permission", "set_contact_override", "remove_contact_override"],
+          enum: ["show", "set_profile", "set_permission", "set_contact_override", "remove_contact_override"],
           description: "The policy action to perform",
         },
         profile: {
@@ -757,6 +758,31 @@ export function createUpdatePolicyTool(
     async execute(_id, params) {
       const action = params.action as string;
       const dataDir = config.dataDir;
+
+      if (action === "show") {
+        const sharing = readSharing(dataDir);
+        const profile = sharing.profile ?? "custom";
+        const allow = ALL_SCOPES.filter((s) => sharing.permissions[s] === "allow");
+        const ask = ALL_SCOPES.filter((s) => sharing.permissions[s] === "ask");
+        const block = ALL_SCOPES.filter((s) => (sharing.permissions[s] ?? "block") === "block");
+        const lines: string[] = [`**Profile:** ${profile}`];
+        if (allow.length) lines.push(`**Allow:** ${allow.map((s) => SCOPE_LABELS[s] || s).join(", ")}`);
+        if (ask.length) lines.push(`**Ask:** ${ask.map((s) => SCOPE_LABELS[s] || s).join(", ")}`);
+        if (block.length) lines.push(`**Block:** ${block.map((s) => SCOPE_LABELS[s] || s).join(", ")}`);
+        if (sharing.contacts && Object.keys(sharing.contacts).length > 0) {
+          lines.push("\n**Per-contact overrides:**");
+          for (const [agentId, entry] of Object.entries(sharing.contacts)) {
+            const name = (entry as any).name ?? agentId;
+            const overrides = (entry as any).overrides as Record<string, string> | undefined;
+            if (overrides) {
+              for (const [scope, perm] of Object.entries(overrides)) {
+                lines.push(`  - ${name}: ${SCOPE_LABELS[scope] || scope} → ${perm}`);
+              }
+            }
+          }
+        }
+        return text(lines.join("\n"));
+      }
 
       if (action === "set_profile") {
         const profile = params.profile as SharingProfile;
