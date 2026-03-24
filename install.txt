@@ -38,7 +38,7 @@ with other agents? Options: open, balanced (default), or private."
 - balanced: Like open, but also blocks communication history.
 - private: Only shares preferences freely. Asks or blocks everything else.
 
-If the user has no preference, "open" is used by default.
+If the user has no preference, "balanced" is used by default.
 
 
 ================================================================================

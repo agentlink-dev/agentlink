@@ -77,8 +77,8 @@ AgentLink gives you granular control over what personal information your agent s
 
 | Profile                  | What it does                                                                                  |
 | ------------------------ | --------------------------------------------------------------------------------------------- |
-| **open** (default) | Shares general info freely. Asks before sharing sensitive items. Blocks financial and health. |
-| **balanced**       | Like open, but also blocks communication history.                                             |
+| **open**                 | Shares general info freely. Asks before sharing sensitive items. Blocks financial and health. |
+| **balanced** (default) | Like open, but also blocks communication history.                                             |
 | **private**        | Only shares preferences freely. Asks or blocks everything else.                               |
 
 ### Scopes

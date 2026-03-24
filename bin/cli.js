@@ -472,17 +472,9 @@ async function setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, l
     process.exit(1);
   }
 
-  // Step 3.5: Watch for gateway restart
-  const restarted = await waitForGatewayRestart(120);
-
-  // Step 4: Handle invite code (if provided)
-  if (joinCode) {
-    const pendingFile = path.join(DATA_DIR, "pending_join.json");
-    fs.writeFileSync(pendingFile, JSON.stringify({ code: joinCode }) + "\n");
-    console.log(pc.green(`  ✓ Invite code ${joinCode} will be processed on gateway start`));
-  }
-
-  // Step 5: Sharing policy (default to "balanced" if not specified)
+  // Step 3.5: Sharing policy (write before gateway restart — local file, no gateway needed)
+  // In Docker, the gateway restart can kill the setup process, so all local writes must
+  // happen before waitForGatewayRestart().
   const profileToSet = (sharingOpts.sharingProfile && ["open", "balanced", "private"].includes(sharingOpts.sharingProfile))
     ? sharingOpts.sharingProfile
     : "balanced";
@@ -506,6 +498,16 @@ async function setup(joinCode, humanNameArg, agentNameArg, emailArg, phoneArg, l
       console.log(pc.yellow(`  ⚠ Unknown scope: ${scope} (skipped)`));
     }
   }
+
+  // Step 4: Handle invite code (if provided)
+  if (joinCode) {
+    const pendingFile = path.join(DATA_DIR, "pending_join.json");
+    fs.writeFileSync(pendingFile, JSON.stringify({ code: joinCode }) + "\n");
+    console.log(pc.green(`  ✓ Invite code ${joinCode} will be processed on gateway start`));
+  }
+
+  // Step 5: Watch for gateway restart (may kill process in Docker — all local writes done above)
+  const restarted = await waitForGatewayRestart(120);
 
   // Show sharing summary
   const sharingConfig = readSharing(DATA_DIR);
