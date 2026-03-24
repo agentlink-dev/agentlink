@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-03-24
+
+### Fixed
+- **Setup sharing.json now written before gateway restart wait.** In Docker, `waitForGatewayRestart()` could kill the setup process when the container's main process restarts, preventing sharing.json from being created. All local file writes (sharing.json, pending_join.json) now happen before the wait.
+
 ## [0.6.3] - 2026-03-23
 
 ### Fixed
